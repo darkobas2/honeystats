@@ -1,0 +1,63 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: honeystats
+  namespace: monitoring
+  labels:
+    app: honeystats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: honeystats
+  template:
+    metadata:
+      labels:
+        app: honeystats
+    spec:
+      containers:
+      - name: honeystats
+        image: python:3.9-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "Installing git..."
+          apt-get update && apt-get install -y git
+          echo "Cloning repository..."
+          git clone https://github.com/darkobas2/honeystats.git /app
+          cd /app
+          echo "Installing dependencies..."
+          pip install --no-cache-dir -r requirements.txt
+          echo "Starting honeystats script..."
+          python3 honeystats.py
+        #env:
+        #- name: PUSHGATEWAY_ADDRESS
+        #  value: "https://pgw.godfather2.ethswarm.org"
+        # You can also add your etherscan and gnosisscan api keys as secrets
+        # and mount them as environment variables here.
+        # - name: ETHERSCAN_API_KEY
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: honeystats-secrets
+        #       key: etherscan-api-key
+        # - name: GNOSISSCAN_API_KEY
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: honeystats-secrets
+        #       key: gnosisscan-api-key
+      restartPolicy: Always
+
+---
+# Example of a secret to store the API keys
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: honeystats-secrets
+#   namespace: monitoring
+# type: Opaque
+# stringData:
+#   etherscan-api-key: "YOUR_ETHERSCAN_API_KEY"
+#   gnosisscan-api-key: "YOUR_GNOSISSCAN_API_KEY"
+
