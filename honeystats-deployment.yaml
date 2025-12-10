@@ -19,6 +19,9 @@ spec:
       containers:
       - name: honeystats
         image: python:3.9-slim
+        volumeMounts:
+        - name: honeystats-data
+          mountPath: /app/data
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -26,7 +29,9 @@ spec:
           echo "Installing git..."
           apt-get update && apt-get install -y git
           echo "Cloning repository..."
-          git clone https://github.com/darkobas2/honeystats.git /app
+          git clone https://github.com/darkobas2/honeystats.git /app/temp
+          cp -R /app/temp/* /app 
+          rm -rf /app/temp
           cd /app
           echo "Installing dependencies..."
           pip install --no-cache-dir -r requirements.txt
@@ -48,16 +53,21 @@ spec:
         #       name: honeystats-secrets
         #       key: gnosisscan-api-key
       restartPolicy: Always
-
+      volumes:
+      - name: honeystats-data
+        persistentVolumeClaim:
+          claimName: honeystats-pvc
 ---
-# Example of a secret to store the API keys
-# apiVersion: v1
-# kind: Secret
-# metadata:
-#   name: honeystats-secrets
-#   namespace: monitoring
-# type: Opaque
-# stringData:
-#   etherscan-api-key: "YOUR_ETHERSCAN_API_KEY"
-#   gnosisscan-api-key: "YOUR_GNOSISSCAN_API_KEY"
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: honeystats-pvc
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-storage
+  resources:
+    requests:
+      storage: 1Gi
 

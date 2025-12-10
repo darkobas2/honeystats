@@ -1,24 +1,12 @@
 {
-  "__inputs": [],
-  "__requires": [
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "7.5.0"
-    },
-    {
-      "type": "prometheus",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "2.26.0"
-    }
-  ],
   "annotations": {
     "list": [
       {
         "builtIn": 1,
-        "datasource": "-- Grafana --",
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -28,72 +16,193 @@
     ]
   },
   "editable": true,
-  "gnetId": null,
+  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
-  "iteration": 1648753894002,
   "links": [],
+  "liveNow": false,
   "panels": [
     {
-      "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 0
       },
-      "id": 10,
-      "panels": [],
+      "id": 1,
       "title": "Gnosis Chain",
       "type": "row"
     },
     {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
         "y": 1
       },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
+      "id": 2,
+      "title": "Stakers and Stake",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "honeystats_gnosis_PostageStamp_validChunkCount",
-          "legendFormat": "Valid Chunk Count"
+          "expr": "honeystats_gnosis_staking_stakers_total",
+          "legendFormat": "Total Stakers"
         },
+        {
+          "expr": "honeystats_gnosis_staking_total_stake",
+          "legendFormat": "Total Stake (BZZ)"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 3,
+      "title": "Staking Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(honeystats_gnosis_staking_stake_slashed_total[5m])",
+          "legendFormat": "Stake Slashed Rate"
+        },
+        {
+          "expr": "rate(honeystats_gnosis_staking_stake_frozen_total[5m])",
+          "legendFormat": "Stake Frozen Rate"
+        },
+        {
+          "expr": "rate(honeystats_gnosis_staking_stake_updated_total[5m])",
+          "legendFormat": "Stake Updated Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4,
+      "title": "Top 10 Winners",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "honeystats_gnosis_Redistribution_winner_total_winnings",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 13,
+      "title": "Top 10 Weekly Winners",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "honeystats_gnosis_Redistribution_winner_weekly_winnings",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 14,
+      "title": "Top 10 Monthly Winners",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "honeystats_gnosis_Redistribution_winner_monthly_winnings",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 5,
+      "title": "Redistribution Commits and Reveals",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "honeystats_gnosis_redistribution_commits_total",
+          "legendFormat": "Commits"
+        },
+        {
+          "expr": "honeystats_gnosis_redistribution_reveals_total",
+          "legendFormat": "Reveals"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 6,
+      "title": "Redistribution Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(honeystats_gnosis_redistribution_truth_selected_total[5m])",
+          "legendFormat": "Truth Selected Rate"
+        },
+        {
+          "expr": "rate(honeystats_gnosis_redistribution_price_adjustment_skipped_total[5m])",
+          "legendFormat": "Price Adjustment Skipped Rate"
+        },
+        {
+          "expr": "rate(honeystats_gnosis_redistribution_withdraw_failed_total[5m])",
+          "legendFormat": "Withdraw Failed Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "id": 15,
+      "title": "BZZ Token Total Supply",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "honeystats_gnosis_BzzToken_totalSupply",
+          "legendFormat": "Total Supply"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 16,
+      "title": "Postage Stamp",
+      "type": "timeseries",
+      "targets": [
         {
           "expr": "honeystats_gnosis_PostageStamp_currentTotalOutPayment",
           "legendFormat": "Total Out Payment"
@@ -103,759 +212,180 @@
           "legendFormat": "Pot"
         },
         {
+          "expr": "honeystats_gnosis_PostageStamp_minimumInitialBalancePerChunk",
+          "legendFormat": "Min Initial Balance/Chunk"
+        },
+        {
           "expr": "honeystats_gnosis_PostageStamp_lastExpiryBalance",
           "legendFormat": "Last Expiry Balance"
         }
-      ],
-      "title": "PostageStamp Health - Gnosis",
-      "description": "Key health indicators for the PostageStamp contract on Gnosis chain. 'Total Out Payment' is the cumulative amount of BZZ paid out. 'Pot' is the current BZZ balance for redistribution. 'Last Expiry Balance' is the balance of the pot at the last expiry event. All BZZ values are in human-readable units.",
-      "type": "stat"
+      ]
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 1
-      },
-      "hiddenSeries": false,
-      "id": 6,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_PostageStamp_lastPrice",
-          "legendFormat": "Last Price"
-        },
-        {
-          "expr": "honeystats_gnosis_PostageStamp_minimumInitialBalancePerChunk",
-          "legendFormat": "Min Initial Balance/Chunk"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "PostageStamp Price - Gnosis",
-      "description": "Price dynamics for the PostageStamp contract on Gnosis chain.",
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "Unpaused"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Paused"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 0,
-        "y": 9
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_PostageStamp_paused",
-          "legendFormat": "Paused"
-        }
-      ],
-      "title": "PostageStamp Status - Gnosis",
-      "description": "Indicates if the PostageStamp contract on Gnosis chain is paused (1) or unpaused (0).",
-      "type": "gauge"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "No"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Yes"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 12,
-        "y": 9
-      },
-      "id": 12,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_PostageStamp_expiredBatchesExist",
-          "legendFormat": "Expired Batches Exist"
-        }
-      ],
-      "title": "PostageStamp Expired Batches - Gnosis",
-      "description": "Boolean: 1 if expired batches exist, 0 otherwise.",
-      "type": "gauge"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 13
-      },
-      "id": 14,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_Staking_withdrawableStake",
-          "legendFormat": "Withdrawable Stake"
-        }
-      ],
-      "title": "Withdrawable Stake - Gnosis",
-      "description": "The amount of BZZ that can be withdrawn from the staking contract on Gnosis chain.",
-      "type": "stat"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "Unpaused"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Paused"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 12,
-        "y": 13
-      },
-      "id": 16,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_Staking_paused",
-          "legendFormat": "Paused"
-        }
-      ],
-      "title": "Staking Status - Gnosis",
-      "description": "Indicates if the Staking contract on Gnosis chain is paused (1) or unpaused (0).",
-      "type": "gauge"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 21
+        "w": 8,
+        "x": 16,
+        "y": 33
       },
       "id": 17,
-      "panels": [],
-      "title": "Gnosis Redistribution Game",
-      "type": "row"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 22
-      },
-      "id": 18,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
+      "title": "Price Oracle",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "honeystats_gnosis_Redistribution_currentRound",
-          "legendFormat": "Current Round"
-        },
-        {
-          "expr": "honeystats_gnosis_Redistribution_currentCommitRound",
-          "legendFormat": "Commit Round"
-        },
-        {
-          "expr": "honeystats_gnosis_Redistribution_currentRevealRound",
-          "legendFormat": "Reveal Round"
-        },
-        {
-          "expr": "honeystats_gnosis_Redistribution_currentClaimRound",
-          "legendFormat": "Claim Round"
+          "expr": "honeystats_gnosis_PriceOracle_currentPrice",
+          "legendFormat": "Current Price"
         }
-      ],
-      "title": "Redistribution Rounds - Gnosis",
-      "description": "The current state of the redistribution game on Gnosis chain.",
-      "type": "stat"
+      ]
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 22
-      },
-      "hiddenSeries": false,
-      "id": 20,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_PostageStamp_pot",
-          "legendFormat": "Winner Reward (Pot)"
-        }
-      ],
-      "title": "Redistribution Winner Reward - Gnosis",
-      "description": "The amount of BZZ to be awarded to the winner of the redistribution game on Gnosis chain.",
-      "type": "stat"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 30
-      },
-      "id": 46,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_Redistribution_winner_depth",
-          "legendFormat": "Winner Depth"
-        },
-        {
-          "expr": "honeystats_gnosis_Redistribution_winner_stake",
-          "legendFormat": "Winner Stake"
-        },
-        {
-          "expr": "honeystats_gnosis_Redistribution_winner_stake_density",
-          "legendFormat": "Winner Stake Density"
-        }
-      ],
-      "title": "Redistribution Winner - Gnosis",
-      "description": "Information about the winner of the last redistribution round on Gnosis chain. Labels show winner's overlay and owner addresses.",
-      "type": "stat"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 1,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 38
-      },
-      "id": 52,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "expr": "topk(10, honeystats_gnosis_Redistribution_winner_total_winnings)",
-          "legendFormat": "{{owner}}"
-        }
-      ],
-      "title": "Top 10 Redistribution Winners - Gnosis",
-      "type": "barchart"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 41
       },
-      "id": 23,
-      "panels": [],
+      "id": 7,
       "title": "Sepolia Testnet",
       "type": "row"
     },
     {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 47
+        "y": 42
       },
-      "id": 25,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
+      "id": 8,
+      "title": "Stakers and Stake",
+      "type": "timeseries",
       "targets": [
         {
-          "expr": "honeystats_sepolia_PostageStamp_validChunkCount",
-          "legendFormat": "Valid Chunk Count"
+          "expr": "honeystats_sepolia_staking_stakers_total",
+          "legendFormat": "Total Stakers"
         },
+        {
+          "expr": "honeystats_sepolia_staking_total_stake",
+          "legendFormat": "Total Stake (BZZ)"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 9,
+      "title": "Staking Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(honeystats_sepolia_staking_stake_slashed_total[5m])",
+          "legendFormat": "Stake Slashed Rate"
+        },
+        {
+          "expr": "rate(honeystats_sepolia_staking_stake_frozen_total[5m])",
+          "legendFormat": "Stake Frozen Rate"
+        },
+        {
+          "expr": "rate(honeystats_sepolia_staking_stake_updated_total[5m])",
+          "legendFormat": "Stake Updated Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "id": 10,
+      "title": "Top 10 Winners",
+      "type": "table",
+      "targets": [
+        {
+          "expr": "honeystats_sepolia_Redistribution_winner_total_winnings",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "id": 11,
+      "title": "Redistribution Commits and Reveals",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "honeystats_sepolia_redistribution_commits_total",
+          "legendFormat": "Commits"
+        },
+        {
+          "expr": "honeystats_sepolia_redistribution_reveals_total",
+          "legendFormat": "Reveals"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "id": 12,
+      "title": "Redistribution Events",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(honeystats_sepolia_redistribution_truth_selected_total[5m])",
+          "legendFormat": "Truth Selected Rate"
+        },
+        {
+          "expr": "rate(honeystats_sepolia_redistribution_price_adjustment_skipped_total[5m])",
+          "legendFormat": "Price Adjustment Skipped Rate"
+        },
+        {
+          "expr": "rate(honeystats_sepolia_redistribution_withdraw_failed_total[5m])",
+          "legendFormat": "Withdraw Failed Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 66
+      },
+      "id": 18,
+      "title": "BZZ Token Total Supply",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "honeystats_sepolia_BzzToken_totalSupply",
+          "legendFormat": "Total Supply"
+        }
+      ]
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 66
+      },
+      "id": 19,
+      "title": "Postage Stamp",
+      "type": "timeseries",
+      "targets": [
         {
           "expr": "honeystats_sepolia_PostageStamp_currentTotalOutPayment",
           "legendFormat": "Total Out Payment"
@@ -863,944 +393,36 @@
         {
           "expr": "honeystats_sepolia_PostageStamp_pot",
           "legendFormat": "Pot"
-        }
-      ],
-      "title": "PostageStamp Health - Sepolia",
-      "description": "Key health indicators for the PostageStamp contract on Sepolia testnet.",
-      "type": "stat"
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 47
-      },
-      "hiddenSeries": false,
-      "id": 27,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_PostageStamp_lastPrice",
-          "legendFormat": "Last Price"
         },
         {
           "expr": "honeystats_sepolia_PostageStamp_minimumInitialBalancePerChunk",
           "legendFormat": "Min Initial Balance/Chunk"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "PostageStamp Price - Sepolia",
-      "description": "Price dynamics for the PostageStamp contract on Sepolia testnet.",
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
         },
         {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+          "expr": "honeystats_sepolia_PostageStamp_lastExpiryBalance",
+          "legendFormat": "Last Expiry Balance"
         }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      ]
     },
     {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "Unpaused"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Paused"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 0,
-        "y": 55
-      },
-      "id": 29,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_PostageStamp_paused",
-          "legendFormat": "Paused"
-        }
-      ],
-      "title": "PostageStamp Status - Sepolia",
-      "description": "Indicates if the PostageStamp contract on Sepolia testnet is paused (1) or unpaused (0).",
-      "type": "gauge"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "No"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Yes"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 12,
-        "y": 55
-      },
-      "id": 31,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_PostageStamp_expiredBatchesExist",
-          "legendFormat": "Expired Batches Exist"
-        }
-      ],
-      "title": "PostageStamp Expired Batches - Sepolia",
-      "description": "Boolean: 1 if expired batches exist, 0 otherwise.",
-      "type": "gauge"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 59
+        "w": 8,
+        "x": 16,
+        "y": 66
       },
-      "id": 33,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
+      "id": 20,
+      "title": "Price Oracle",
+      "type": "timeseries",
       "targets": [
-        {
-          "expr": "honeystats_sepolia_Staking_withdrawableStake",
-          "legendFormat": "Withdrawable Stake"
-        }
-      ],
-      "title": "Withdrawable Stake - Sepolia",
-      "description": "The amount of BZZ that can be withdrawn from the staking contract on Sepolia testnet.",
-      "type": "stat"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "color": "green",
-                  "text": "Unpaused"
-                },
-                "1": {
-                  "color": "red",
-                  "text": "Paused"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 12,
-        "x": 12,
-        "y": 59
-      },
-      "id": 35,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_Staking_paused",
-          "legendFormat": "Paused"
-        }
-      ],
-      "title": "Staking Status - Sepolia",
-      "description": "Indicates if the Staking contract on Sepolia testnet is paused (1) or unpaused (0).",
-      "type": "gauge"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 67
-      },
-      "id": 49,
-      "panels": [],
-      "title": "Sepolia Redistribution Game",
-      "type": "row"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 68
-      },
-      "id": 37,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_Redistribution_currentRound",
-          "legendFormat": "Current Round"
-        },
-        {
-          "expr": "honeystats_sepolia_Redistribution_currentCommitRound",
-          "legendFormat": "Commit Round"
-        },
-        {
-          "expr": "honeystats_sepolia_Redistribution_currentRevealRound",
-          "legendFormat": "Reveal Round"
-        },
-        {
-          "expr": "honeystats_sepolia_Redistribution_currentClaimRound",
-          "legendFormat": "Claim Round"
-        }
-      ],
-      "title": "Redistribution Rounds - Sepolia",
-      "description": "The current state of the redistribution game on Sepolia testnet.",
-      "type": "stat"
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 68
-      },
-      "hiddenSeries": false,
-      "id": 39,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "sum(increase(honeystats_redistribution_commit_count{chain=\"sepolia\"}[5m]))",
-          "legendFormat": "Commit Count"
-        },
-        {
-          "expr": "sum(increase(honeystats_redistribution_reveal_count{chain=\"sepolia\"}[5m]))",
-          "legendFormat": "Reveal Count"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Redistribution Participation - Sepolia",
-      "description": "The number of commits and reveals in the redistribution game on Sepolia testnet.",
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 76
-      },
-      "id": 48,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "honeystats_sepolia_Redistribution_winner_depth",
-          "legendFormat": "Winner Depth"
-        },
-        {
-          "expr": "honeystats_sepolia_Redistribution_winner_stake",
-          "legendFormat": "Winner Stake"
-        },
-        {
-          "expr": "honeystats_sepolia_Redistribution_winner_stake_density",
-          "legendFormat": "Winner Stake Density"
-        }
-      ],
-      "title": "Redistribution Winner - Sepolia",
-      "description": "Information about the winner of the last redistribution round on Sepolia testnet. Labels show winner's overlay and owner addresses.",
-      "type": "stat"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 84
-      },
-      "id": 51,
-      "panels": [],
-      "title": "Cross-Chain Metrics",
-      "type": "row"
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 85
-      },
-      "hiddenSeries": false,
-      "id": 43,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_PriceOracle_currentPrice",
-          "legendFormat": "Gnosis"
-        },
         {
           "expr": "honeystats_sepolia_PriceOracle_currentPrice",
-          "legendFormat": "Sepolia"
+          "legendFormat": "Current Price"
         }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Price Oracle: Price per Chunk",
-      "description": "Compares the calculated price per chunk from the PriceOracle contract on Gnosis and Sepolia. This value is derived by dividing 'currentPrice' by 'priceBase' from the contract.",
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-.
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 93
-      },
-      "hiddenSeries": false,
-      "id": 45,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.5",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spacePoints": false,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "expr": "honeystats_gnosis_BzzToken_totalSupply",
-          "legendFormat": "Gnosis"
-        },
-        {
-          "expr": "honeystats_sepolia_BzzToken_totalSupply",
-          "legendFormat": "Sepolia"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "BzzToken Total Supply",
-      "description": "Compares the total supply of the BZZ token on Gnosis and Sepolia.",
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      ]
     }
   ],
-  "refresh": "5s",
-  "schemaVersion": 27,
+  "schemaVersion": 36,
   "style": "dark",
   "tags": [],
   "templating": {
@@ -1810,21 +432,10 @@
     "from": "now-6h",
     "to": "now"
   },
-  "timepicker": {
-    "refresh_intervals": [
-      "5s",
-      "10s",
-      "30s",
-      "1m",
-      "5m",
-      "15m",
-      "30m",
-      "1h",
-      "2h",
-      "1d"
-    ]
-  },
+  "timepicker": {},
   "timezone": "",
-  "title": "Honeystats Advanced Dashboard",
-  "version": 10
+  "title": "Honeystats Dashboard",
+  "uid": "new-honeystats-dashboard",
+  "version": 1,
+  "weekStart": ""
 }
