@@ -27,12 +27,12 @@ CHAINS = {
             "bzztoken": {
                 "name": "BzzToken",
                 "address": "0x543dDb01Ba47acB11de34891cD86B675F04840db",
-                "deployment_block": 0, # BzzToken is older than the provided deployment blocks
+                "deployment_block": 4594507,
             },
             "redistribution": {
                 "name": "Redistribution",
-                "address": "0xb45242E53EA394B2344211BdF9F63CA32E8Abf38",
-                "deployment_block": 8262535,
+                "address": "0x5b718E36F5Ce2F2F7e25A397040436Ce6af3e89e",
+                "deployment_block": 8646721,
             },
             "postagestamp": {
                 "name": "PostageStamp",
