@@ -541,7 +541,7 @@ def process_staking_events(registry, error_counter, chain_name):
         registry=registry
     )
     stake_frozen_gauge = Gauge(
-        f'honeystats_{chain_name}_staking_stake_frozen_events_total',
+        f'honeystats_{chain_name}_staking_stake_frozen_total',
         'Total number of StakeFrozen events in the staking contract',
         registry=registry
     )
