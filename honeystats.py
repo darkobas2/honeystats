@@ -492,6 +492,17 @@ def process_staking_events(registry, error_counter, chain_name):
         error_counter.labels(chain_name=chain_name, error_type='read_stakers_file').inc()
         stakers = {}
 
+    # Load frozen stakers data
+    frozen_stakers_file_path = os.path.join(DATA_DIR, f"frozen_stakers_{chain_name}.json")
+    try:
+        with open(frozen_stakers_file_path, 'r') as f:
+            frozen_stakers = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        with print_lock:
+            print(f"    - Could not load frozen stakers file: {e}")
+        error_counter.labels(chain_name=chain_name, error_type='read_frozen_stakers_file').inc()
+        frozen_stakers = []
+
     abi = get_abi(contract_key, chain_name)
     contract = w3.eth.contract(address=contract_address, abi=abi)
     
@@ -500,8 +511,8 @@ def process_staking_events(registry, error_counter, chain_name):
         'Total number of StakeSlashed events in the staking contract',
         registry=registry
     )
-    stake_frozen_counter = Counter(
-        f'honeystats_{chain_name}_staking_stake_frozen_total',
+    stake_frozen_events_counter = Counter(
+        f'honeystats_{chain_name}_staking_stake_frozen_events_total',
         'Total number of StakeFrozen events in the staking contract',
         registry=registry
     )
@@ -523,6 +534,12 @@ def process_staking_events(registry, error_counter, chain_name):
         registry=registry
     )
 
+    frozen_stake_gauge = Gauge(
+        f'honeystats_{chain_name}_staking_frozen_stake_amount',
+        'Total amount of frozen stake in the staking contract',
+        registry=registry
+    )
+
     from_block = last_block + 1
 
     with print_lock:
@@ -536,15 +553,26 @@ def process_staking_events(registry, error_counter, chain_name):
         try:
             for event_data in contract.events.StakeSlashed.get_logs(from_block=from_block, to_block=to_block):
                 stake_slashed_counter.inc()
+                owner = event_data.args.slashed
+                if owner in frozen_stakers:
+                    frozen_stakers.remove(owner)
             
             for event_data in contract.events.StakeFrozen.get_logs(from_block=from_block, to_block=to_block):
-                stake_frozen_counter.inc()
+                stake_frozen_events_counter.inc()
+                owner = event_data.args.frozen
+                if owner not in frozen_stakers:
+                    frozen_stakers.append(owner)
             
             for event_data in contract.events.StakeUpdated.get_logs(from_block=from_block, to_block=to_block):
                 stake_updated_counter.inc()
                 owner = event_data.args.owner
                 stake = event_data.args.committedStake
                 stakers[owner] = stake
+
+            for event_data in contract.events.StakeWithdrawn.get_logs(from_block=from_block, to_block=to_block):
+                owner = event_data.args.node
+                if owner in frozen_stakers:
+                    frozen_stakers.remove(owner)
 
             # Save last processed block number
             with open(last_block_file_path, 'w') as f:
@@ -559,10 +587,25 @@ def process_staking_events(registry, error_counter, chain_name):
                     print(f"    - Could not save stakers file: {e}")
                 error_counter.labels(chain_name=chain_name, error_type='write_stakers_file').inc()
             
+            # Save frozen stakers data
+            try:
+                with open(frozen_stakers_file_path, 'w') as f:
+                    json.dump(frozen_stakers, f)
+            except Exception as e:
+                with print_lock:
+                    print(f"    - Could not save frozen stakers file: {e}")
+                error_counter.labels(chain_name=chain_name, error_type='write_frozen_stakers_file').inc()
+            
             stakers_gauge.set(len(stakers))
             
             total_stake = sum(stakers.values()) if stakers else 0
             total_stake_gauge.set(total_stake / (10**BZZ_DECIMALS))
+
+            total_frozen_stake = 0
+            for owner in frozen_stakers:
+                if owner in stakers:
+                    total_frozen_stake += stakers[owner]
+            frozen_stake_gauge.set(total_frozen_stake / (10**BZZ_DECIMALS))
 
             from_block = to_block + 1
 
@@ -584,11 +627,26 @@ def process_staking_events(registry, error_counter, chain_name):
         with print_lock:
             print(f"    - Could not save stakers file: {e}")
         error_counter.labels(chain_name=chain_name, error_type='write_stakers_file').inc()
+
+    # Save frozen stakers data
+    try:
+        with open(frozen_stakers_file_path, 'w') as f:
+            json.dump(frozen_stakers, f)
+    except Exception as e:
+        with print_lock:
+            print(f"    - Could not save frozen stakers file: {e}")
+        error_counter.labels(chain_name=chain_name, error_type='write_frozen_stakers_file').inc()
     
     stakers_gauge.set(len(stakers))
     
     total_stake = sum(stakers.values()) if stakers else 0
     total_stake_gauge.set(total_stake / (10**BZZ_DECIMALS))
+
+    total_frozen_stake = 0
+    for owner in frozen_stakers:
+        if owner in stakers:
+            total_frozen_stake += stakers[owner]
+    frozen_stake_gauge.set(total_frozen_stake / (10**BZZ_DECIMALS))
 
 
 import threading
