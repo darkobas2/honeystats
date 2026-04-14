@@ -22,7 +22,7 @@ BZZ_DECIMALS = 16
 CHAINS = {
     "sepolia": {
         "name": "Sepolia Testnet",
-        "rpc_url": "https://sep.swarm1.ethswarm.org",
+        "rpc_url": os.environ.get("SEPOLIA_RPC_URL", "https://sep.swarm1.ethswarm.org"),
         "contracts": {
             "bzztoken": {
                 "name": "BzzToken",
@@ -53,7 +53,7 @@ CHAINS = {
     },
     "gnosis": {
         "name": "Gnosis Chain",
-        "rpc_url": "https://gno.prod.ethswarm.org",
+        "rpc_url": os.environ.get("GNOSIS_RPC_URL", "https://gno.prod.ethswarm.org"),
         "contracts": {
             "bzztoken": {
                 "name": "BzzToken",
@@ -459,38 +459,62 @@ def process_redistribution_events(registry, error_counter, chain_name):
         scan_to_block = min(to_block_config, current_block)
         from_block = last_block + 1
 
+        # Topic0 hashes for events that changed across versions
+        TOPICS = {
+            "committed": [
+                "0x68e0867601a98978930107aee7f425665e61edd70ca594c68ca5da9e81f84c29", # v0-v4
+                "0xaadc88121471799d39ee2bbe1dd30a4ab57510e2a33bd6e537de5fafd2daa886"  # v5+
+            ],
+            "revealed": [
+                "0x13fc17fd71632266fe82092de6dd91a06b4fa68d8dc950492e5421cbed55a6a5"
+            ]
+        }
+
         while from_block <= scan_to_block:
             to_block = min(from_block + 10000, scan_to_block)
             with print_lock:
                 print(f"  - Scanning {v_label} for redistribution events from block {from_block} to {to_block}")
 
             try:
-                # currentRound() might not exist in old versions or might fail if not synced
+                # 1. Fetch standard events via ABI if they exist
+                try:
+                    for event_data in contract.events.TruthSelected.get_logs(from_block=from_block, to_block=to_block):
+                        event_counts["truth_selected"] += 1
+                except (AttributeError, ValueError):
+                    pass
+
+                try:
+                    for event_data in contract.events.PriceAdjustmentSkipped.get_logs(from_block=from_block, to_block=to_block):
+                        event_counts["price_adjustment_skipped"] += 1
+                except (AttributeError, ValueError):
+                    pass
+
+                try:
+                    for event_data in contract.events.WithdrawFailed.get_logs(from_block=from_block, to_block=to_block):
+                        event_counts["withdraw_failed"] += 1
+                except (AttributeError, ValueError):
+                    pass
+
+                # 2. Fetch Changed/Missing events via Topic0 for reliability across versions
+                for event_type, topics in TOPICS.items():
+                    for topic0 in topics:
+                        logs = w3.eth.get_logs({
+                            "address": contract_address,
+                            "fromBlock": from_block,
+                            "toBlock": to_block,
+                            "topics": [topic0]
+                        })
+                        event_counts[event_type] += len(logs)
+
+                # 3. Handle Round-based gauges
                 try:
                     current_round = contract.functions.currentRound().call()
+                    for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
+                        commits_gauge.labels(round=current_round).set(event_data.args._count)
+                    for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
+                        reveals_gauge.labels(round=current_round).set(event_data.args._count)
                 except:
-                    current_round = "unknown"
-
-                for event_data in contract.events.TruthSelected.get_logs(from_block=from_block, to_block=to_block):
-                    event_counts["truth_selected"] += 1
-
-                for event_data in contract.events.PriceAdjustmentSkipped.get_logs(from_block=from_block, to_block=to_block):
-                    event_counts["price_adjustment_skipped"] += 1
-
-                for event_data in contract.events.WithdrawFailed.get_logs(from_block=from_block, to_block=to_block):
-                    event_counts["withdraw_failed"] += 1
-
-                for event_data in contract.events.Committed.get_logs(from_block=from_block, to_block=to_block):
-                    event_counts["committed"] += 1
-
-                for event_data in contract.events.Revealed.get_logs(from_block=from_block, to_block=to_block):
-                    event_counts["revealed"] += 1
-
-                for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
-                    commits_gauge.labels(round=current_round).set(event_data.args._count)
-                
-                for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
-                    reveals_gauge.labels(round=current_round).set(event_data.args._count)
+                    pass
 
                 # Save last processed block number
                 with open(last_block_file_path, 'w') as f:
