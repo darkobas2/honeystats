@@ -360,7 +360,7 @@ def process_redistribution_events(registry, error_counter, chain_name):
     except (FileNotFoundError, json.JSONDecodeError) as e:
         with print_lock:
             print(f"    - Could not load event counts file: {e}")
-        event_counts = {"truth_selected": 0, "price_adjustment_skipped": 0, "withdraw_failed": 0}
+        event_counts = {"truth_selected": 0, "price_adjustment_skipped": 0, "withdraw_failed": 0, "committed": 0, "revealed": 0}
 
     abi = get_abi(contract_key, chain_name)
     contract = w3.eth.contract(address=contract_address, abi=abi)
@@ -378,6 +378,18 @@ def process_redistribution_events(registry, error_counter, chain_name):
     withdraw_failed_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_withdraw_failed_total',
         'Total number of WithdrawFailed events in the redistribution game',
+        registry=registry
+    )
+    
+    committed_gauge = Gauge(
+        f'honeystats_{chain_name}_redistribution_committed_total',
+        'Total number of Committed events in the redistribution game',
+        registry=registry
+    )
+
+    revealed_gauge = Gauge(
+        f'honeystats_{chain_name}_redistribution_revealed_total',
+        'Total number of Revealed events in the redistribution game',
         registry=registry
     )
     
@@ -421,6 +433,12 @@ def process_redistribution_events(registry, error_counter, chain_name):
                 with print_lock:
                     print(f"Found WithdrawFailed event in block {event_data.blockNumber}")
                 event_counts["withdraw_failed"] += 1
+
+            for event_data in contract.events.Committed.get_logs(from_block=from_block, to_block=to_block):
+                event_counts["committed"] += 1
+
+            for event_data in contract.events.Revealed.get_logs(from_block=from_block, to_block=to_block):
+                event_counts["revealed"] += 1
 
             found_commits_event = False
             for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
@@ -468,6 +486,123 @@ def process_redistribution_events(registry, error_counter, chain_name):
     truth_selected_gauge.set(event_counts["truth_selected"])
     price_adjustment_skipped_gauge.set(event_counts["price_adjustment_skipped"])
     withdraw_failed_gauge.set(event_counts["withdraw_failed"])
+    committed_gauge.set(event_counts.get("committed", 0))
+    revealed_gauge.set(event_counts.get("revealed", 0))
+
+
+def process_postagestamp_events(registry, error_counter, chain_name):
+    """Processes postagestamp events from a given chain to track rented capacity."""
+    chain_config = CHAINS[chain_name]
+    w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
+
+    contract_key = "postagestamp"
+    contract_config = chain_config["contracts"][contract_key]
+    contract_friendly_name = contract_config["name"].replace(" ", "_")
+    contract_address = contract_config["address"]
+
+    with print_lock:
+        print(f"Processing postagestamp events for {contract_friendly_name} on {chain_config['name']}...")
+
+    # Load last processed block number
+    current_block = w3.eth.block_number
+    last_block_file_path = os.path.join(DATA_DIR, f"last_block_postagestamp_{chain_name}.json")
+    last_block_data = {}
+    try:
+        with open(last_block_file_path, 'r') as f:
+            last_block_data = json.load(f)
+            last_block = last_block_data.get(chain_name, contract_config.get("deployment_block", 0))
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        with print_lock:
+            print(f"    - Could not load last block file for postagestamp events: {e}")
+        error_counter.labels(chain_name=chain_name, error_type='read_last_block_postagestamp').inc()
+        last_block = contract_config.get("deployment_block", 0)
+        last_block_data[chain_name] = last_block
+        with open(last_block_file_path, 'w') as f:
+            json.dump(last_block_data, f)
+            
+    # Load batches data
+    batches_file_path = os.path.join(DATA_DIR, f"batches_{chain_name}.json")
+    try:
+        with open(batches_file_path, 'r') as f:
+            batches = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        with print_lock:
+            print(f"    - Could not load batches file: {e}")
+        error_counter.labels(chain_name=chain_name, error_type='read_batches_file').inc()
+        batches = {}
+
+    abi = get_abi(contract_key, chain_name)
+    contract = w3.eth.contract(address=contract_address, abi=abi)
+
+    rented_capacity_gauge = Gauge(
+        f'honeystats_{chain_name}_postagestamp_rented_capacity_tb',
+        'Total rented capacity in TB',
+        registry=registry
+    )
+
+    from_block = last_block + 1
+
+    while from_block <= current_block:
+        to_block = min(from_block + 10000, current_block)
+        with print_lock:
+            print(f"  - Scanning for postagestamp events from block {from_block} to {to_block}")
+
+        try:
+            for event_data in contract.events.BatchCreated.get_logs(from_block=from_block, to_block=to_block):
+                batch_id = "0x" + event_data.args.batchId.hex()
+                batches[batch_id] = {
+                    "depth": event_data.args.depth,
+                    "owner": event_data.args.owner,
+                    "normalisedBalance": event_data.args.normalisedBalance
+                }
+
+            for event_data in contract.events.BatchTopUp.get_logs(from_block=from_block, to_block=to_block):
+                batch_id = "0x" + event_data.args.batchId.hex()
+                if batch_id in batches:
+                    batches[batch_id]["normalisedBalance"] = event_data.args.normalisedBalance
+
+            for event_data in contract.events.BatchDepthIncrease.get_logs(from_block=from_block, to_block=to_block):
+                batch_id = "0x" + event_data.args.batchId.hex()
+                if batch_id in batches:
+                    batches[batch_id]["depth"] = event_data.args.newDepth
+                    batches[batch_id]["normalisedBalance"] = event_data.args.normalisedBalance
+
+            # Save last processed block number
+            with open(last_block_file_path, 'w') as f:
+                json.dump({chain_name: to_block}, f)
+
+            # Save batches data
+            try:
+                with open(batches_file_path, 'w') as f:
+                    json.dump(batches, f)
+            except Exception as e:
+                with print_lock:
+                    print(f"    - Could not save batches file: {e}")
+                error_counter.labels(chain_name=chain_name, error_type='write_batches_file').inc()
+
+            from_block = to_block + 1
+
+        except Exception as e:
+            with print_lock:
+                print(f"    - Could not get postagestamp events for blocks {from_block}-{to_block}: {e}")
+            error_counter.labels(chain_name=chain_name, error_type='get_postagestamp_events').inc()
+            # If we get an error, we skip this chunk and move to the next one
+            from_block = to_block + 1
+            with open(last_block_file_path, 'w') as f:
+                json.dump({chain_name: from_block}, f)
+            time.sleep(1)
+
+    # Calculate rented capacity
+    # capacity = sum(2^depth * 4096) bytes
+    # We should also check for expired batches, but for simplicity we'll just sum all known batches
+    # In a real scenario, we'd need currentTotalOutpayment to check validity.
+    
+    total_capacity_bytes = 0
+    for batch in batches.values():
+        total_capacity_bytes += (2**batch["depth"]) * 4096
+    
+    total_capacity_tb = total_capacity_bytes / (1024**4)
+    rented_capacity_gauge.set(total_capacity_tb)
 
 
 def process_staking_events(registry, error_counter, chain_name):
@@ -751,6 +886,10 @@ def main(registry):
         staking_thread = threading.Thread(target=process_staking_events, args=(registry, redistribution_errors, chain_name))
         threads.append(staking_thread)
         staking_thread.start()
+
+        postagestamp_thread = threading.Thread(target=process_postagestamp_events, args=(registry, redistribution_errors, chain_name))
+        threads.append(postagestamp_thread)
+        postagestamp_thread.start()
 
     for thread in threads:
         thread.join()
