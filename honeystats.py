@@ -64,6 +64,16 @@ CHAINS = {
                 "name": "Redistribution",
                 "address": "0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d",
                 "deployment_block": 41105199,
+                "versions": [
+                    {"address": "0x8c26b7CA61A6608B011cBa43d8cA4476B6D8dA17", "from_block": 25527081, "to_block": 27391083},
+                    {"address": "0x1F9a1FDe5c6350E949C5E4aa163B4c97011199B4", "from_block": 27391083, "to_block": 31305674},
+                    {"address": "0x0964c834C660C44E0afd3B7F10F19f275ee31411", "from_block": 31305674, "to_block": 34159666},
+                    {"address": "0xD9dFE7b0ddc7CcA41304FE9507ed823faD3bdBab", "from_block": 34159666, "to_block": 35961755},
+                    {"address": "0xFfF73fd14537277B3F3807e1AB0F85E17c0ABea5", "from_block": 35961755, "to_block": 37339181},
+                    {"address": "0x69C62CaCd68C2CBBf3D0C7502eF556DB3AC7889B", "from_block": 37339181, "to_block": 40430243},
+                    {"address": "0x9f9A8dA5A0Db2611f9802ba1a0B99cC4A1c3b6A2", "from_block": 40430243, "to_block": 41105199},
+                    {"address": "0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d", "from_block": 41105199, "to_block": None}
+                ]
             },
             "priceoracle": {
                 "name": "PriceOracle",
@@ -74,11 +84,20 @@ CHAINS = {
                 "name": "PostageStamp",
                 "address": "0x45a1502382541Cd610CC9068e88727426b696293",
                 "deployment_block": 31305656,
+                "versions": [
+                    {"address": "0x6a1A21ECA3aB28BE85C7Ba22b2d6eAE5907c900E", "from_block": 16515648, "to_block": 25527076},
+                    {"address": "0x30d155478eF27Ab32A1D578BE7b84BC5988aF381", "from_block": 25527076, "to_block": 31305656},
+                    {"address": "0x45a1502382541Cd610CC9068e88727426b696293", "from_block": 31305656, "to_block": None}
+                ]
             },
             "staking": {
                 "name": "Staking",
                 "address": "0xda2a16EE889E7F04980A8d597b48c8D51B9518F4",
                 "deployment_block": 40430237,
+                "versions": [
+                    {"address": "0x445B848e16730988F871c4a09aB74526d27c2Ce8", "from_block": 37339175, "to_block": 40430237},
+                    {"address": "0xda2a16EE889E7F04980A8d597b48c8D51B9518F4", "from_block": 40430237, "to_block": None}
+                ]
             },
         },
     },
@@ -91,6 +110,38 @@ def get_abi(contract_key, chain_name):
     with open(abi_path, 'r') as f:
         abi_string = f.read()
     return json.loads(abi_string)
+
+
+def get_current_outpayment(price_updates, target_block):
+    """
+    Calculates currentTotalOutpayment at a target block based on price update history.
+    price_updates: list of {"block": int, "price": int}
+    """
+    if not price_updates:
+        return 0
+    
+    # Sort updates by block
+    sorted_updates = sorted(price_updates, key=lambda x: x["block"])
+    
+    total_outpayment = 0
+    prev_block = sorted_updates[0]["block"]
+    prev_price = 0 # Price before the first update is 0
+    
+    for update in sorted_updates:
+        if update["block"] > target_block:
+            break
+        
+        # Add outpayment accumulated since last update
+        total_outpayment += (update["block"] - prev_block) * prev_price
+        
+        prev_block = update["block"]
+        prev_price = update["price"]
+        
+    # Add outpayment since the last update before target_block
+    if target_block > prev_block:
+        total_outpayment += (target_block - prev_block) * prev_price
+        
+    return total_outpayment
 
 
 def is_simple_output(outputs):
@@ -323,47 +374,22 @@ def process_winner_events(registry, error_counter):
 
 def process_redistribution_events(registry, error_counter, chain_name):
     """Processes redistribution events from a given chain."""
-    print(f"Starting redistribution event processing for {chain_name}...")
     chain_config = CHAINS[chain_name]
     w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
 
-    contract_key = "redistribution"
-    contract_config = chain_config["contracts"][contract_key]
+    contract_config = chain_config["contracts"]["redistribution"]
     contract_friendly_name = contract_config["name"].replace(" ", "_")
-    contract_address = contract_config["address"]
+    
+    # We support multiple versions if they exist in the config
+    versions = contract_config.get("versions", [{"address": contract_config["address"], "from_block": contract_config.get("deployment_block", 0), "to_block": None}])
 
-    with print_lock:
-        print(f"Processing redistribution events for {contract_friendly_name} on {chain_config['name']}...")
-
-    # Load last processed block number
-    current_block = w3.eth.block_number
-    last_block_file_path = os.path.join(DATA_DIR, f"last_block_redistribution_{chain_name}.json")
-    last_block_data = {}
-    try:
-        with open(last_block_file_path, 'r') as f:
-            last_block_data = json.load(f)
-            last_block = last_block_data.get(chain_name, contract_config.get("deployment_block", 0))
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load last block file for redistribution events: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='read_last_block_redistribution').inc()
-        last_block = contract_config.get("deployment_block", 0)
-        last_block_data[chain_name] = last_block
-        with open(last_block_file_path, 'w') as f:
-            json.dump(last_block_data, f)
-
-    # Load event counts data
+    # Load event counts data (accumulated across all versions)
     event_counts_file_path = os.path.join(DATA_DIR, f"event_counts_redistribution_{chain_name}.json")
     try:
         with open(event_counts_file_path, 'r') as f:
             event_counts = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load event counts file: {e}")
+    except (FileNotFoundError, json.JSONDecodeError):
         event_counts = {"truth_selected": 0, "price_adjustment_skipped": 0, "withdraw_failed": 0, "committed": 0, "revealed": 0}
-
-    abi = get_abi(contract_key, chain_name)
-    contract = w3.eth.contract(address=contract_address, abi=abi)
 
     truth_selected_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_truth_selected_total',
@@ -407,80 +433,81 @@ def process_redistribution_events(registry, error_counter, chain_name):
         registry=registry
     )
 
-    from_block = last_block + 1
+    current_block = w3.eth.block_number
 
-    while from_block <= current_block:
-        to_block = min(from_block + 10000, current_block)
+    for v_idx, version in enumerate(versions):
+        contract_address = version["address"]
+        from_block_config = version["from_block"]
+        to_block_config = version["to_block"] if version["to_block"] else current_block
+        
+        v_label = f"v{v_idx}"
         with print_lock:
-            print(f"  - Scanning for redistribution events from block {from_block} to {to_block}")
+            print(f"Processing redistribution {v_label} ({contract_address}) on {chain_config['name']}...")
 
+        # Load last processed block number for this version
+        last_block_file_path = os.path.join(DATA_DIR, f"last_block_redistribution_{chain_name}_{v_label}.json")
         try:
-            current_round = contract.functions.currentRound().call()
+            with open(last_block_file_path, 'r') as f:
+                last_block_data = json.load(f)
+                last_block = last_block_data.get(chain_name, from_block_config)
+        except (FileNotFoundError, json.JSONDecodeError):
+            last_block = from_block_config
+
+        abi = get_abi("redistribution", chain_name)
+        contract = w3.eth.contract(address=contract_address, abi=abi)
+
+        scan_to_block = min(to_block_config, current_block)
+        from_block = last_block + 1
+
+        while from_block <= scan_to_block:
+            to_block = min(from_block + 10000, scan_to_block)
             with print_lock:
-                print(f"  - Current round for redistribution on {chain_name} is {current_round}")
+                print(f"  - Scanning {v_label} for redistribution events from block {from_block} to {to_block}")
 
-            for event_data in contract.events.TruthSelected.get_logs(from_block=from_block, to_block=to_block):
+            try:
+                # currentRound() might not exist in old versions or might fail if not synced
+                try:
+                    current_round = contract.functions.currentRound().call()
+                except:
+                    current_round = "unknown"
+
+                for event_data in contract.events.TruthSelected.get_logs(from_block=from_block, to_block=to_block):
+                    event_counts["truth_selected"] += 1
+
+                for event_data in contract.events.PriceAdjustmentSkipped.get_logs(from_block=from_block, to_block=to_block):
+                    event_counts["price_adjustment_skipped"] += 1
+
+                for event_data in contract.events.WithdrawFailed.get_logs(from_block=from_block, to_block=to_block):
+                    event_counts["withdraw_failed"] += 1
+
+                for event_data in contract.events.Committed.get_logs(from_block=from_block, to_block=to_block):
+                    event_counts["committed"] += 1
+
+                for event_data in contract.events.Revealed.get_logs(from_block=from_block, to_block=to_block):
+                    event_counts["revealed"] += 1
+
+                for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
+                    commits_gauge.labels(round=current_round).set(event_data.args._count)
+                
+                for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
+                    reveals_gauge.labels(round=current_round).set(event_data.args._count)
+
+                # Save last processed block number
+                with open(last_block_file_path, 'w') as f:
+                    json.dump({chain_name: to_block}, f)
+
+                # Save event counts
+                with open(event_counts_file_path, 'w') as f:
+                    json.dump(event_counts, f)
+
+                from_block = to_block + 1
+
+            except Exception as e:
                 with print_lock:
-                    print(f"Found TruthSelected event in block {event_data.blockNumber}")
-                event_counts["truth_selected"] += 1
-
-            for event_data in contract.events.PriceAdjustmentSkipped.get_logs(from_block=from_block, to_block=to_block):
-                with print_lock:
-                    print(f"Found PriceAdjustmentSkipped event in block {event_data.blockNumber}")
-                event_counts["price_adjustment_skipped"] += 1
-
-            for event_data in contract.events.WithdrawFailed.get_logs(from_block=from_block, to_block=to_block):
-                with print_lock:
-                    print(f"Found WithdrawFailed event in block {event_data.blockNumber}")
-                event_counts["withdraw_failed"] += 1
-
-            for event_data in contract.events.Committed.get_logs(from_block=from_block, to_block=to_block):
-                event_counts["committed"] += 1
-
-            for event_data in contract.events.Revealed.get_logs(from_block=from_block, to_block=to_block):
-                event_counts["revealed"] += 1
-
-            found_commits_event = False
-            for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
-                with print_lock:
-                    print(f"Found CountCommits event in block {event_data.blockNumber} with count {event_data.args._count}")
-                commits_gauge.labels(round=current_round).set(event_data.args._count)
-                found_commits_event = True
-            
-            if not found_commits_event:
-                with print_lock:
-                    print(f"  - No CountCommits events found for blocks {from_block}-{to_block}")
-
-            found_reveals_event = False
-            for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
-                with print_lock:
-                    print(f"Found CountReveals event in block {event_data.blockNumber} with count {event_data.args._count}")
-                reveals_gauge.labels(round=current_round).set(event_data.args._count)
-                found_reveals_event = True
-
-            if not found_reveals_event:
-                with print_lock:
-                    print(f"  - No CountReveals events found for blocks {from_block}-{to_block}")
-
-            # Save last processed block number
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: to_block}, f)
-
-            # Save event counts
-            with open(event_counts_file_path, 'w') as f:
-                json.dump(event_counts, f)
-
-            from_block = to_block + 1
-
-        except Exception as e:
-            with print_lock:
-                print(f"    - Could not get redistribution events for blocks {from_block}-{to_block}: {e}")
-            error_counter.labels(chain_name=chain_name, error_type='get_redistribution_events').inc()
-            # If we get an error, we skip this chunk and move to the next one
-            from_block = to_block + 1
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: from_block}, f)
-            time.sleep(1)
+                    print(f"    - Could not get redistribution {v_label} events for blocks {from_block}-{to_block}: {e}")
+                error_counter.labels(chain_name=chain_name, error_type=f'get_redistribution_{v_label}_events').inc()
+                from_block = to_block + 1
+                time.sleep(1)
 
     # Set event count gauges
     truth_selected_gauge.set(event_counts["truth_selected"])
@@ -495,114 +522,232 @@ def process_postagestamp_events(registry, error_counter, chain_name):
     chain_config = CHAINS[chain_name]
     w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
 
-    contract_key = "postagestamp"
-    contract_config = chain_config["contracts"][contract_key]
+    contract_config = chain_config["contracts"]["postagestamp"]
     contract_friendly_name = contract_config["name"].replace(" ", "_")
-    contract_address = contract_config["address"]
+    
+    # We support multiple versions if they exist in the config
+    versions = contract_config.get("versions", [{"address": contract_config["address"], "from_block": contract_config.get("deployment_block", 0), "to_block": None}])
 
-    with print_lock:
-        print(f"Processing postagestamp events for {contract_friendly_name} on {chain_config['name']}...")
-
-    # Load last processed block number
-    current_block = w3.eth.block_number
-    last_block_file_path = os.path.join(DATA_DIR, f"last_block_postagestamp_{chain_name}.json")
-    last_block_data = {}
-    try:
-        with open(last_block_file_path, 'r') as f:
-            last_block_data = json.load(f)
-            last_block = last_block_data.get(chain_name, contract_config.get("deployment_block", 0))
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load last block file for postagestamp events: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='read_last_block_postagestamp').inc()
-        last_block = contract_config.get("deployment_block", 0)
-        last_block_data[chain_name] = last_block
-        with open(last_block_file_path, 'w') as f:
-            json.dump(last_block_data, f)
-            
-    # Load batches data
-    batches_file_path = os.path.join(DATA_DIR, f"batches_{chain_name}.json")
-    try:
-        with open(batches_file_path, 'r') as f:
-            batches = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load batches file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='read_batches_file').inc()
-        batches = {}
-
-    abi = get_abi(contract_key, chain_name)
-    contract = w3.eth.contract(address=contract_address, abi=abi)
+    total_capacity_bytes = 0
+    total_active_batches = 0
+    total_ttl_sum = 0
+    total_min_ttl = float("inf")
+    total_expiring_soon_bytes = 0
+    global_owner_capacity = {}
 
     rented_capacity_gauge = Gauge(
-        f'honeystats_{chain_name}_postagestamp_rented_capacity_tb',
-        'Total rented capacity in TB',
-        registry=registry
+        f"honeystats_{chain_name}_postagestamp_rented_capacity_tb",
+        "Total active rented capacity in TB",
+        registry=registry,
     )
 
-    from_block = last_block + 1
+    active_batches_gauge = Gauge(
+        f"honeystats_{chain_name}_postagestamp_active_batches_total",
+        "Total number of active (non-expired) postage batches",
+        registry=registry,
+    )
 
-    while from_block <= current_block:
-        to_block = min(from_block + 10000, current_block)
+    min_ttl_gauge = Gauge(
+        f"honeystats_{chain_name}_postagestamp_min_ttl_blocks",
+        "Minimum TTL remaining among all active batches (blocks)",
+        registry=registry,
+    )
+
+    avg_ttl_gauge = Gauge(
+        f"honeystats_{chain_name}_postagestamp_avg_ttl_blocks",
+        "Average TTL remaining among all active batches (blocks)",
+        registry=registry,
+    )
+
+    expiring_soon_gauge = Gauge(
+        f"honeystats_{chain_name}_postagestamp_expiring_30d_capacity_tb",
+        "Capacity expiring within the next 30 days (TB)",
+        registry=registry,
+    )
+
+    owner_capacity_gauge = Gauge(
+        f"honeystats_{chain_name}_postagestamp_owner_capacity_tb",
+        "Active capacity owned by address (TB)",
+        ["owner"],
+        registry=registry,
+    )
+
+    current_block = w3.eth.block_number
+    # Approximation for 30 days in blocks (Gnosis ~5s, Sepolia ~12s)
+    blocks_in_30d = (30 * 24 * 60 * 60) // (5 if chain_name == "gnosis" else 12)
+
+    for v_idx, version in enumerate(versions):
+        contract_address = version["address"]
+        from_block_config = version["from_block"]
+        to_block_config = (
+            version["to_block"] if version["to_block"] else current_block
+        )
+
+        v_label = f"v{v_idx}"
         with print_lock:
-            print(f"  - Scanning for postagestamp events from block {from_block} to {to_block}")
+            print(
+                f"Processing postagestamp {v_label} ({contract_address}) on {chain_config['name']}..."
+            )
 
+        # Load last processed block number for this version
+        last_block_file_path = os.path.join(
+            DATA_DIR, f"last_block_postagestamp_{chain_name}_{v_label}.json"
+        )
         try:
-            for event_data in contract.events.BatchCreated.get_logs(from_block=from_block, to_block=to_block):
-                batch_id = "0x" + event_data.args.batchId.hex()
-                batches[batch_id] = {
-                    "depth": event_data.args.depth,
-                    "owner": event_data.args.owner,
-                    "normalisedBalance": event_data.args.normalisedBalance
-                }
+            with open(last_block_file_path, "r") as f:
+                last_block_data = json.load(f)
+                last_block = last_block_data.get(chain_name, from_block_config)
+        except (FileNotFoundError, json.JSONDecodeError):
+            last_block = from_block_config
 
-            for event_data in contract.events.BatchTopUp.get_logs(from_block=from_block, to_block=to_block):
-                batch_id = "0x" + event_data.args.batchId.hex()
-                if batch_id in batches:
-                    batches[batch_id]["normalisedBalance"] = event_data.args.normalisedBalance
+        # Load batches data for this version
+        batches_file_path = os.path.join(
+            DATA_DIR, f"batches_{chain_name}_{v_label}.json"
+        )
+        try:
+            with open(batches_file_path, "r") as f:
+                batches = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            batches = {}
 
-            for event_data in contract.events.BatchDepthIncrease.get_logs(from_block=from_block, to_block=to_block):
-                batch_id = "0x" + event_data.args.batchId.hex()
-                if batch_id in batches:
-                    batches[batch_id]["depth"] = event_data.args.newDepth
-                    batches[batch_id]["normalisedBalance"] = event_data.args.normalisedBalance
+        # Load price updates for this version
+        price_updates_file_path = os.path.join(
+            DATA_DIR, f"price_updates_{chain_name}_{v_label}.json"
+        )
+        try:
+            with open(price_updates_file_path, "r") as f:
+                price_updates = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            price_updates = []
 
-            # Save last processed block number
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: to_block}, f)
+        abi = get_abi("postagestamp", chain_name)
+        contract = w3.eth.contract(address=contract_address, abi=abi)
 
-            # Save batches data
+        scan_to_block = min(to_block_config, current_block)
+        from_block = last_block + 1
+
+        while from_block <= scan_to_block:
+            to_block = min(from_block + 10000, scan_to_block)
+            with print_lock:
+                print(
+                    f"  - Scanning {v_label} for postagestamp events from block {from_block} to {to_block}"
+                )
+
             try:
-                with open(batches_file_path, 'w') as f:
-                    json.dump(batches, f)
+                for event_data in contract.events.BatchCreated.get_logs(
+                    from_block=from_block, to_block=to_block
+                ):
+                    batch_id = "0x" + event_data.args.batchId.hex()
+                    batches[batch_id] = {
+                        "depth": event_data.args.depth,
+                        "owner": event_data.args.owner,
+                        "normalisedBalance": event_data.args.normalisedBalance,
+                    }
+
+                for event_data in contract.events.BatchTopUp.get_logs(
+                    from_block=from_block, to_block=to_block
+                ):
+                    batch_id = "0x" + event_data.args.batchId.hex()
+                    if batch_id in batches:
+                        batches[batch_id][
+                            "normalisedBalance"
+                        ] = event_data.args.normalisedBalance
+
+                for event_data in contract.events.BatchDepthIncrease.get_logs(
+                    from_block=from_block, to_block=to_block
+                ):
+                    batch_id = "0x" + event_data.args.batchId.hex()
+                    if batch_id in batches:
+                        batches[batch_id]["depth"] = event_data.args.newDepth
+                        batches[batch_id][
+                            "normalisedBalance"
+                        ] = event_data.args.normalisedBalance
+
+                for event_data in contract.events.PriceUpdate.get_logs(
+                    from_block=from_block, to_block=to_block
+                ):
+                    price_updates.append(
+                        {
+                            "block": event_data.blockNumber,
+                            "price": event_data.args.price,
+                        }
+                    )
+
+                # Save last processed block number
+                with open(last_block_file_path, "w") as f:
+                    json.dump({chain_name: to_block}, f)
+
+                from_block = to_block + 1
+
             except Exception as e:
                 with print_lock:
-                    print(f"    - Could not save batches file: {e}")
-                error_counter.labels(chain_name=chain_name, error_type='write_batches_file').inc()
+                    print(
+                        f"    - Could not get postagestamp {v_label} events for blocks {from_block}-{to_block}: {e}"
+                    )
+                error_counter.labels(
+                    chain_name=chain_name,
+                    error_type=f"get_postagestamp_{v_label}_events",
+                ).inc()
+                from_block = to_block + 1
+                time.sleep(1)
 
-            from_block = to_block + 1
+        # Save batches and price updates
+        with open(batches_file_path, "w") as f:
+            json.dump(batches, f)
+        with open(price_updates_file_path, "w") as f:
+            json.dump(price_updates, f)
 
-        except Exception as e:
-            with print_lock:
-                print(f"    - Could not get postagestamp events for blocks {from_block}-{to_block}: {e}")
-            error_counter.labels(chain_name=chain_name, error_type='get_postagestamp_events').inc()
-            # If we get an error, we skip this chunk and move to the next one
-            from_block = to_block + 1
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: from_block}, f)
-            time.sleep(1)
+        # Calculate active capacity for this version
+        current_outpayment = get_current_outpayment(price_updates, scan_to_block)
+        current_price = price_updates[-1]["price"] if price_updates else 0
 
-    # Calculate rented capacity
-    # capacity = sum(2^depth * 4096) bytes
-    # We should also check for expired batches, but for simplicity we'll just sum all known batches
-    # In a real scenario, we'd need currentTotalOutpayment to check validity.
-    
-    total_capacity_bytes = 0
-    for batch in batches.values():
-        total_capacity_bytes += (2**batch["depth"]) * 4096
-    
-    total_capacity_tb = total_capacity_bytes / (1024**4)
+        version_capacity_bytes = 0
+        version_active_batches = 0
+
+        for batch in batches.values():
+            if batch["normalisedBalance"] > current_outpayment:
+                capacity = (2 ** batch["depth"]) * 4096
+                version_capacity_bytes += capacity
+                version_active_batches += 1
+
+                # TTL Calculation
+                if current_price > 0:
+                    ttl = (
+                        batch["normalisedBalance"] - current_outpayment
+                    ) // current_price
+                    total_ttl_sum += ttl
+                    if ttl < total_min_ttl:
+                        total_min_ttl = ttl
+
+                    if ttl < blocks_in_30d:
+                        total_expiring_soon_bytes += capacity
+
+                # Owner tracking
+                owner = batch["owner"]
+                global_owner_capacity[owner] = (
+                    global_owner_capacity.get(owner, 0) + capacity
+                )
+
+        total_capacity_bytes += version_capacity_bytes
+        total_active_batches += version_active_batches
+
+    # Final Gauge Updates
+    total_capacity_tb = total_capacity_bytes / (1024 ** 4)
     rented_capacity_gauge.set(total_capacity_tb)
+    active_batches_gauge.set(total_active_batches)
+
+    if total_active_batches > 0:
+        avg_ttl_gauge.set(total_ttl_sum / total_active_batches)
+        min_ttl_gauge.set(total_min_ttl if total_min_ttl != float("inf") else 0)
+
+    expiring_soon_gauge.set(total_expiring_soon_bytes / (1024 ** 4))
+
+    # Set top 10 owners
+    sorted_owners = sorted(
+        global_owner_capacity.items(), key=lambda x: x[1], reverse=True
+    )
+    for owner, cap_bytes in sorted_owners[:10]:
+        owner_capacity_gauge.labels(owner=owner).set(cap_bytes / (1024 ** 4))
 
 
 def process_staking_events(registry, error_counter, chain_name):
