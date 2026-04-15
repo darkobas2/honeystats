@@ -389,7 +389,10 @@ def process_redistribution_events(registry, error_counter, chain_name):
         with open(event_counts_file_path, 'r') as f:
             event_counts = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        event_counts = {"truth_selected": 0, "price_adjustment_skipped": 0, "withdraw_failed": 0, "committed": 0, "revealed": 0}
+        event_counts = {}
+    # Migration: ensure all required keys exist (old on-disk files predate committed/revealed)
+    for _k in ("truth_selected", "price_adjustment_skipped", "withdraw_failed", "committed", "revealed"):
+        event_counts.setdefault(_k, 0)
 
     truth_selected_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_truth_selected_total',
