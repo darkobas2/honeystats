@@ -422,14 +422,12 @@ def process_redistribution_events(registry, error_counter, chain_name):
     commits_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_commits_total',
         'Total number of commits in the redistribution game',
-        ['round'],
         registry=registry
     )
     
     reveals_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_reveals_total',
         'Total number of reveals in the redistribution game',
-        ['round'],
         registry=registry
     )
 
@@ -461,14 +459,38 @@ def process_redistribution_events(registry, error_counter, chain_name):
 
         # Topic0 hashes for events that changed across versions
         TOPICS = {
+            "truth_selected": [
+                "0xd68bda4c8cfe73e460a4da48180fc20ddf81897751f902599953f9599a14187c", # v0-v4 (TruthSelected(bytes32))
+                "0x34e8eda4cd857cd2865becf58a47748f31415f4a382cbb2cc0c64b9a27c717be"  # v5+ (TruthSelected(bytes32,uint8))
+            ],
+            "price_adjustment_skipped": [
+                "0x20378e5d379eabfa30444ecc5eb2b87d0d77bdbf5a58d80d008673b0ca642141"
+            ],
+            "withdraw_failed": [
+                "0x7ae187a0c04cf55b655ca83fa11d37854c882bf1fdcb588469b414731bb0e05a"
+            ],
             "committed": [
                 "0x68e0867601a98978930107aee7f425665e61edd70ca594c68ca5da9e81f84c29", # v0-v4
                 "0xaadc88121471799d39ee2bbe1dd30a4ab57510e2a33bd6e537de5fafd2daa886"  # v5+
             ],
             "revealed": [
-                "0x13fc17fd71632266fe82092de6dd91a06b4fa68d8dc950492e5421cbed55a6a5"
+                "0x9ac97321502877edfdf86a17da1d2a38c12f7b1b6a6a40cd5e5f7261a50149fd", # v0-v4
+                "0x13fc17fd71632266fe82092de6dd91a06b4fa68d8dc950492e5421cbed55a6a5"  # v5+
             ]
         }
+
+        # Set initial values for gauges
+        truth_selected_gauge.set(event_counts["truth_selected"])
+        price_adjustment_skipped_gauge.set(event_counts["price_adjustment_skipped"])
+        withdraw_failed_gauge.set(event_counts["withdraw_failed"])
+        committed_gauge.set(event_counts.get("committed", 0))
+        revealed_gauge.set(event_counts.get("revealed", 0))
+
+        # Initial push to gateway
+        try:
+            push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
+        except:
+            pass
 
         while from_block <= scan_to_block:
             to_block = min(from_block + 10000, scan_to_block)
@@ -476,26 +498,7 @@ def process_redistribution_events(registry, error_counter, chain_name):
                 print(f"  - Scanning {v_label} for redistribution events from block {from_block} to {to_block}")
 
             try:
-                # 1. Fetch standard events via ABI if they exist
-                try:
-                    for event_data in contract.events.TruthSelected.get_logs(from_block=from_block, to_block=to_block):
-                        event_counts["truth_selected"] += 1
-                except (AttributeError, ValueError):
-                    pass
-
-                try:
-                    for event_data in contract.events.PriceAdjustmentSkipped.get_logs(from_block=from_block, to_block=to_block):
-                        event_counts["price_adjustment_skipped"] += 1
-                except (AttributeError, ValueError):
-                    pass
-
-                try:
-                    for event_data in contract.events.WithdrawFailed.get_logs(from_block=from_block, to_block=to_block):
-                        event_counts["withdraw_failed"] += 1
-                except (AttributeError, ValueError):
-                    pass
-
-                # 2. Fetch Changed/Missing events via Topic0 for reliability across versions
+                # 1. Fetch Missing events via Topic0 for reliability across versions
                 for event_type, topics in TOPICS.items():
                     for topic0 in topics:
                         logs = w3.eth.get_logs({
@@ -506,13 +509,25 @@ def process_redistribution_events(registry, error_counter, chain_name):
                         })
                         event_counts[event_type] += len(logs)
 
-                # 3. Handle Round-based gauges
+                # Update gauges incrementally
+                truth_selected_gauge.set(event_counts["truth_selected"])
+                price_adjustment_skipped_gauge.set(event_counts["price_adjustment_skipped"])
+                withdraw_failed_gauge.set(event_counts["withdraw_failed"])
+                committed_gauge.set(event_counts.get("committed", 0))
+                revealed_gauge.set(event_counts.get("revealed", 0))
+
+                # Push to gateway incrementally
                 try:
-                    current_round = contract.functions.currentRound().call()
+                    push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
+                except:
+                    pass
+
+                # 2. Handle Round-based gauges
+                try:
                     for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
-                        commits_gauge.labels(round=current_round).set(event_data.args._count)
+                        commits_gauge.set(event_data.args._count)
                     for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
-                        reveals_gauge.labels(round=current_round).set(event_data.args._count)
+                        reveals_gauge.set(event_data.args._count)
                 except:
                     pass
 
@@ -752,11 +767,11 @@ def process_postagestamp_events(registry, error_counter, chain_name):
                     global_owner_capacity.get(owner, 0) + capacity
                 )
 
-        total_capacity_bytes += version_capacity_bytes
-        total_active_batches += version_active_batches
+        total_capacity_bytes += version_capacity_bytes if version["to_block"] is None else 0
+        total_active_batches += version_active_batches if version["to_block"] is None else 0
 
     # Final Gauge Updates
-    total_capacity_tb = total_capacity_bytes / (1024 ** 4)
+    total_capacity_tb = total_capacity_bytes / (10**12)
     rented_capacity_gauge.set(total_capacity_tb)
     active_batches_gauge.set(total_active_batches)
 
@@ -764,14 +779,14 @@ def process_postagestamp_events(registry, error_counter, chain_name):
         avg_ttl_gauge.set(total_ttl_sum / total_active_batches)
         min_ttl_gauge.set(total_min_ttl if total_min_ttl != float("inf") else 0)
 
-    expiring_soon_gauge.set(total_expiring_soon_bytes / (1024 ** 4))
+    expiring_soon_gauge.set(total_expiring_soon_bytes / (10**12))
 
     # Set top 10 owners
     sorted_owners = sorted(
         global_owner_capacity.items(), key=lambda x: x[1], reverse=True
     )
     for owner, cap_bytes in sorted_owners[:10]:
-        owner_capacity_gauge.labels(owner=owner).set(cap_bytes / (1024 ** 4))
+        owner_capacity_gauge.labels(owner=owner).set(cap_bytes / (10**12))
 
 
 def process_staking_events(registry, error_counter, chain_name):
