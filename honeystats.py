@@ -4,7 +4,7 @@ import time
 import json
 import threading
 from web3 import Web3
-from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway, delete_from_gateway
 
 # --- Configuration ---
 
@@ -425,12 +425,14 @@ def process_redistribution_events(registry, error_counter, chain_name):
     commits_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_commits_total',
         'Total number of commits in the redistribution game',
+        ['round'],
         registry=registry
     )
-    
+
     reveals_gauge = Gauge(
         f'honeystats_{chain_name}_redistribution_reveals_total',
         'Total number of reveals in the redistribution game',
+        ['round'],
         registry=registry
     )
 
@@ -482,26 +484,13 @@ def process_redistribution_events(registry, error_counter, chain_name):
             ]
         }
 
-        # Set initial values for gauges
-        truth_selected_gauge.set(event_counts["truth_selected"])
-        price_adjustment_skipped_gauge.set(event_counts["price_adjustment_skipped"])
-        withdraw_failed_gauge.set(event_counts["withdraw_failed"])
-        committed_gauge.set(event_counts.get("committed", 0))
-        revealed_gauge.set(event_counts.get("revealed", 0))
-
-        # Initial push to gateway
-        try:
-            push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
-        except:
-            pass
-
         while from_block <= scan_to_block:
             to_block = min(from_block + 10000, scan_to_block)
             with print_lock:
                 print(f"  - Scanning {v_label} for redistribution events from block {from_block} to {to_block}")
 
             try:
-                # 1. Fetch Missing events via Topic0 for reliability across versions
+                # 1. Fetch events via Topic0 for reliability across versions
                 for event_type, topics in TOPICS.items():
                     for topic0 in topics:
                         logs = w3.eth.get_logs({
@@ -512,25 +501,13 @@ def process_redistribution_events(registry, error_counter, chain_name):
                         })
                         event_counts[event_type] += len(logs)
 
-                # Update gauges incrementally
-                truth_selected_gauge.set(event_counts["truth_selected"])
-                price_adjustment_skipped_gauge.set(event_counts["price_adjustment_skipped"])
-                withdraw_failed_gauge.set(event_counts["withdraw_failed"])
-                committed_gauge.set(event_counts.get("committed", 0))
-                revealed_gauge.set(event_counts.get("revealed", 0))
-
-                # Push to gateway incrementally
+                # 2. Handle Round-based gauges (track per-round to avoid overwriting)
                 try:
-                    push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
-                except:
-                    pass
-
-                # 2. Handle Round-based gauges
-                try:
+                    current_round = contract.functions.currentRound().call()
                     for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
-                        commits_gauge.set(event_data.args._count)
+                        commits_gauge.labels(round=str(current_round)).set(event_data.args._count)
                     for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
-                        reveals_gauge.set(event_data.args._count)
+                        reveals_gauge.labels(round=str(current_round)).set(event_data.args._count)
                 except:
                     pass
 
@@ -739,6 +716,12 @@ def process_postagestamp_events(registry, error_counter, chain_name):
         with open(price_updates_file_path, "w") as f:
             json.dump(price_updates, f)
 
+        # Only aggregate totals from the current (latest) version — deprecated
+        # contract versions' batches aren't being paid for and shouldn't skew
+        # avg/min TTL, owner totals, or 30d-expiring capacity.
+        if version["to_block"] is not None:
+            continue
+
         # Calculate active capacity for this version
         current_outpayment = get_current_outpayment(price_updates, scan_to_block)
         current_price = price_updates[-1]["price"] if price_updates else 0
@@ -770,8 +753,8 @@ def process_postagestamp_events(registry, error_counter, chain_name):
                     global_owner_capacity.get(owner, 0) + capacity
                 )
 
-        total_capacity_bytes += version_capacity_bytes if version["to_block"] is None else 0
-        total_active_batches += version_active_batches if version["to_block"] is None else 0
+        total_capacity_bytes += version_capacity_bytes
+        total_active_batches += version_active_batches
 
     # Final Gauge Updates
     total_capacity_tb = total_capacity_bytes / (10**12)
@@ -1030,6 +1013,16 @@ import threading
 
 def main(registry):
     """Main function to query contracts and push metrics."""
+
+    # Clear previous push so stale labeled series (owners that fell out of
+    # top-10, rounds that ended, tokens removed) don't linger in Pushgateway.
+    try:
+        delete_from_gateway(PUSHGATEWAY_ADDRESS, job="honeystats")
+        with print_lock:
+            print(f"Cleared prior honeystats metrics from {PUSHGATEWAY_ADDRESS}")
+    except Exception as e:
+        with print_lock:
+            print(f"Could not clear pushgateway (maybe first run): {e}")
 
     redistribution_errors = Counter(
         'honeystats_redistribution_errors_total',
