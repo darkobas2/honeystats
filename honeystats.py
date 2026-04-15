@@ -1052,29 +1052,16 @@ def main(registry):
                         registry=registry,
                     )
 
-    threads = []
-    # --- Process Events in parallel ---
-    winner_thread = threading.Thread(target=process_winner_events, args=(registry, redistribution_errors))
-    threads.append(winner_thread)
-    winner_thread.start()
-    
-    for chain_name in CHAINS:
-        redistribution_thread = threading.Thread(target=process_redistribution_events, args=(registry, redistribution_errors, chain_name))
-        threads.append(redistribution_thread)
-        redistribution_thread.start()
-    
-        staking_thread = threading.Thread(target=process_staking_events, args=(registry, redistribution_errors, chain_name))
-        threads.append(staking_thread)
-        staking_thread.start()
-
-        postagestamp_thread = threading.Thread(target=process_postagestamp_events, args=(registry, redistribution_errors, chain_name))
-        threads.append(postagestamp_thread)
-        postagestamp_thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    # --- Query Contract Metrics ---
+    # --- Query Contract Metrics FIRST (fast, synchronous) ---
+    # These are cheap read-only contract calls. Running them before the long
+    # event-scan threads means PriceOracle / Staking / PostageStamp view
+    # values land in Pushgateway on the first intermediate push, even while
+    # redistribution event scan is still catching up over hours.
+    bzz_denominated_metrics = {
+        "BzzToken": ["totalSupply"],
+        "PostageStamp": ["currentTotalOutPayment", "pot", "minimumInitialBalancePerChunk", "lastExpiryBalance"],
+        "Staking": ["withdrawableStake"]
+    }
     for chain_name, chain_config in CHAINS.items():
         with print_lock:
             print(f"Querying {chain_config['name']}...")
@@ -1099,7 +1086,7 @@ def main(registry):
                     ):
                         try:
                             value = func().call()
-                            
+
                             if contract_friendly_name == "PriceOracle" and func.fn_name == "currentPrice":
                                 try:
                                     price_base = contract.functions.priceBase().call()
@@ -1110,13 +1097,7 @@ def main(registry):
                                         print(f"    - Could not get priceBase for PriceOracle: {e}")
 
                             metric_name = f"honeystats_{chain_name}_{contract_friendly_name}_{func.fn_name}"
-                            
-                            bzz_denominated_metrics = {
-                                "BzzToken": ["totalSupply"],
-                                "PostageStamp": ["currentTotalOutPayment", "pot", "minimumInitialBalancePerChunk", "lastExpiryBalance"],
-                                "Staking": ["withdrawableStake"]
-                            }
-                            
+
                             if contract_friendly_name in bzz_denominated_metrics and func.fn_name in bzz_denominated_metrics[contract_friendly_name]:
                                 if isinstance(value, (int, float)):
                                     gauges[metric_name].set(value / (10**BZZ_DECIMALS))
@@ -1132,11 +1113,42 @@ def main(registry):
                 with print_lock:
                     print(f"    - Could not process contract {contract_friendly_name}: {e}")
 
+    # Intermediate push: so PriceOracle etc. are visible before the long
+    # event scanners finish. Event gauges are still at their defaults here.
     try:
+        push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
         with print_lock:
-            push_to_gateway(
-                PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry
-            )
+            print("Pushed contract-view metrics to Pushgateway (event scan continues).")
+    except Exception as e:
+        with print_lock:
+            print(f"Could not push contract-view metrics: {e}")
+
+    # --- Process Events in parallel (slow: scans millions of blocks on cold start) ---
+    threads = []
+    winner_thread = threading.Thread(target=process_winner_events, args=(registry, redistribution_errors))
+    threads.append(winner_thread)
+    winner_thread.start()
+
+    for chain_name in CHAINS:
+        redistribution_thread = threading.Thread(target=process_redistribution_events, args=(registry, redistribution_errors, chain_name))
+        threads.append(redistribution_thread)
+        redistribution_thread.start()
+
+        staking_thread = threading.Thread(target=process_staking_events, args=(registry, redistribution_errors, chain_name))
+        threads.append(staking_thread)
+        staking_thread.start()
+
+        postagestamp_thread = threading.Thread(target=process_postagestamp_events, args=(registry, redistribution_errors, chain_name))
+        threads.append(postagestamp_thread)
+        postagestamp_thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Final push: event-scan gauges now populated alongside contract-view gauges.
+    try:
+        push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
+        with print_lock:
             print("Successfully pushed metrics to Pushgateway.")
     except Exception as e:
         with print_lock:
