@@ -4,7 +4,7 @@ import time
 import json
 import threading
 from web3 import Web3
-from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway, delete_from_gateway
+from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
 
 # --- Configuration ---
 
@@ -1014,16 +1014,6 @@ import threading
 def main(registry):
     """Main function to query contracts and push metrics."""
 
-    # Clear previous push so stale labeled series (owners that fell out of
-    # top-10, rounds that ended, tokens removed) don't linger in Pushgateway.
-    try:
-        delete_from_gateway(PUSHGATEWAY_ADDRESS, job="honeystats")
-        with print_lock:
-            print(f"Cleared prior honeystats metrics from {PUSHGATEWAY_ADDRESS}")
-    except Exception as e:
-        with print_lock:
-            print(f"Could not clear pushgateway (maybe first run): {e}")
-
     redistribution_errors = Counter(
         'honeystats_redistribution_errors_total',
         'Total number of errors in the redistribution game',
@@ -1112,16 +1102,6 @@ def main(registry):
             except Exception as e:
                 with print_lock:
                     print(f"    - Could not process contract {contract_friendly_name}: {e}")
-
-    # Intermediate push: so PriceOracle etc. are visible before the long
-    # event scanners finish. Event gauges are still at their defaults here.
-    try:
-        push_to_gateway(PUSHGATEWAY_ADDRESS, job="honeystats", registry=registry)
-        with print_lock:
-            print("Pushed contract-view metrics to Pushgateway (event scan continues).")
-    except Exception as e:
-        with print_lock:
-            print(f"Could not push contract-view metrics: {e}")
 
     # --- Process Events in parallel (slow: scans millions of blocks on cold start) ---
     threads = []
