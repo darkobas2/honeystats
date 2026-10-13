@@ -158,218 +158,92 @@ def is_simple_output(outputs):
 print_lock = threading.Lock()
 
 def process_winner_events(registry, error_counter):
-    """Processes winner events from the Gnosis chain and creates a leaderboard."""
+    """Leaderboard of redistribution rewards on Gnosis.
+
+    The reward is the PotWithdrawn(recipient, totalAmount) emitted by the
+    PostageStamp contract when the winner claims; the recipient is the winning
+    node's owner address. Windows are block-based (Gnosis: 5s blocks).
+    """
     chain_name = "gnosis"
     chain_config = CHAINS[chain_name]
     w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
 
-    contract_key = "redistribution"
-    contract_config = chain_config["contracts"][contract_key]
-    contract_friendly_name = contract_config["name"].replace(" ", "_")
-    contract_address = contract_config["address"]
+    contract_config = chain_config["contracts"]["postagestamp"]
+    versions = contract_config.get("versions", [{"address": contract_config["address"], "from_block": contract_config.get("deployment_block", 0), "to_block": None}])
+    # No redistribution before the first Redistribution contract.
+    first_block = chain_config["contracts"]["redistribution"]["versions"][0]["from_block"]
+    abi = get_abi("postagestamp", chain_name)
 
-    with print_lock:
-        print(f"Processing winner events for {contract_friendly_name} on {chain_config['name']}...")
+    state_path = os.path.join(DATA_DIR, f"rewards_{chain_name}.json")
+    try:
+        with open(state_path, 'r') as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {"last_block": first_block - 1, "recent": [], "all_time": {}}
 
-    # Load last processed block number
     current_block = w3.eth.block_number
-    last_block_data = {}
-    try:
-        with open(LAST_BLOCK_FILE, 'r') as f:
-            last_block_data = json.load(f)
-            last_block = last_block_data.get(chain_name, contract_config.get("deployment_block", 0))
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load last block file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='read_last_block').inc()
-        last_block = contract_config.get("deployment_block", 0)
-        last_block_data[chain_name] = last_block
-        with open(LAST_BLOCK_FILE, 'w') as f:
-            json.dump(last_block_data, f)
-
-    # Load winners data
-    winners_file_path = os.path.join(DATA_DIR, f"winners_{chain_name}.json")
-    try:
-        with open(winners_file_path, 'r') as f:
-            winners_data = json.load(f)
-            if isinstance(winners_data, dict):
-                # Convert old format to new format
-                winners = []
-                for owner, stake in winners_data.items():
-                    winners.append({"owner": owner, "stake": stake, "timestamp": 0})
-            else:
-                winners = winners_data
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        with print_lock:
-            print(f"    - Could not load winners file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='read_winners_file').inc()
-        winners = []
-        
-    # Remove winners older than 30 days and ensure they are dictionaries
-    thirty_days_ago = int(time.time()) - 30 * 24 * 60 * 60
-    winners = [winner for winner in winners if isinstance(winner, dict) and winner.get("timestamp", 0) > thirty_days_ago]
-
-    abi = get_abi(contract_key, chain_name)
-    contract = w3.eth.contract(address=contract_address, abi=abi)
-    event = contract.events.WinnerSelected()
-
-    # The Gnosis node has a limit on the number of blocks to query
-    # so we process events in chunks
-    from_block = last_block + 1
-
-    while from_block <= current_block:
-        to_block = min(from_block + 9999, current_block)
-        with print_lock:
-            print(f"  - Scanning for WinnerSelected events from block {from_block} to {to_block}")
-
-        try:
-            for event_data in event.get_logs(from_block=from_block, to_block=to_block):
-                owner = event_data.args.winner.owner
-                stake = event_data.args.winner.stake
-                block = w3.eth.get_block(event_data.blockNumber)
-                timestamp = block.timestamp
-                winners.append({"owner": owner, "stake": stake, "timestamp": timestamp})
-
-            # Update last processed block number
-            last_block_data[chain_name] = to_block
-            with open(LAST_BLOCK_FILE, 'w') as f:
-                json.dump(last_block_data, f)
-
+    windows_left = REWARDS_MAX_WINDOWS_PER_RUN
+    for version in versions:
+        to_limit = current_block if version["to_block"] is None else version["to_block"] - 1
+        from_block = max(state["last_block"] + 1, version["from_block"], first_block)
+        contract = w3.eth.contract(address=Web3.to_checksum_address(version["address"]), abi=abi)
+        while from_block <= to_limit and windows_left > 0:
+            to_block = min(from_block + 9999, to_limit)
+            try:
+                logs = contract.events.PotWithdrawn.get_logs(from_block=from_block, to_block=to_block)
+            except Exception as e:
+                with print_lock:
+                    print(f"    - Could not get PotWithdrawn events for blocks {from_block}-{to_block}: {e}")
+                error_counter.labels(chain_name=chain_name, error_type='get_reward_events').inc()
+                windows_left = 0  # retry this window next run
+                break
+            for ev in logs:
+                owner = ev.args.recipient
+                amount = ev.args.totalAmount
+                state["recent"].append([ev.blockNumber, owner, amount])
+                entry = state["all_time"].setdefault(owner, [0, 0])
+                entry[0] += amount
+                entry[1] += 1
+            state["last_block"] = to_block
             from_block = to_block + 1
+            windows_left -= 1
 
-        except Exception as e:
-            with print_lock:
-                print(f"    - Could not get events for blocks {from_block}-{to_block}: {e}")
-            error_counter.labels(chain_name=chain_name, error_type='get_events').inc()
-            # If we get an error, we skip this chunk and move to the next one
-            from_block = to_block + 1
-            last_block_data[chain_name] = from_block
-            with open(LAST_BLOCK_FILE, 'w') as f:
-                json.dump(last_block_data, f)
-            time.sleep(1)
-
-    # Save winners data
+    head = state["last_block"]
+    state["recent"] = [r for r in state["recent"] if r[0] > head - REWARDS_WINDOW_BLOCKS["30d"]]
     try:
-        with open(winners_file_path, 'w') as f:
-            json.dump(winners, f)
+        with open(state_path, 'w') as f:
+            json.dump(state, f)
     except Exception as e:
         with print_lock:
-            print(f"    - Could not save winners file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='write_winners_file').inc()
+            print(f"    - Could not save rewards file: {e}")
+        error_counter.labels(chain_name=chain_name, error_type='write_rewards_file').inc()
 
-    # --- Process Winners ---
-    
-    weekly_winners = {}
-    monthly_winners = {}
-    all_time_winners = {}
-    
-    current_week = int(time.strftime("%U"))
-    current_month = int(time.strftime("%m"))
-    
-    for winner in winners:
-        owner = winner["owner"]
-        stake = winner["stake"]
-        
-        # All time winners
-        if owner in all_time_winners:
-            all_time_winners[owner] += stake
-        else:
-            all_time_winners[owner] = stake
-            
-        # Weekly winners
-        winner_week = int(time.strftime("%U", time.localtime(winner["timestamp"])))
-        if winner_week == current_week:
-            if owner in weekly_winners:
-                weekly_winners[owner] += stake
-            else:
-                weekly_winners[owner] = stake
-                
-        # Monthly winners
-        winner_month = int(time.strftime("%m", time.localtime(winner["timestamp"])))
-        if winner_month == current_month:
-            if owner in monthly_winners:
-                monthly_winners[owner] += stake
-            else:
-                monthly_winners[owner] = stake
-                
-    # --- Weekly Winners ---
-                
-    # Save weekly winners data
-    weekly_winners_file_path = os.path.join(DATA_DIR, f"winners-weekly_{chain_name}.json")
-    try:
-        with open(weekly_winners_file_path, 'w') as f:
-            json.dump(weekly_winners, f)
-    except Exception as e:
-        with print_lock:
-            print(f"    - Could not save weekly winners file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='write_winners_weekly_file').inc()
-        
-    # Create leaderboard for weekly winners
-    sorted_weekly_winners = sorted(weekly_winners.items(), key=lambda item: item[1], reverse=True)
-    
-    # Create Gauge for top 10 weekly winners
-    metric_name_weekly = f"honeystats_{chain_name}_{contract_friendly_name}_winner_weekly_winnings"
-    gauge_weekly = Gauge(
-        metric_name_weekly,
-        f"Total weekly winnings for top 10 winners of {contract_friendly_name} on {chain_config['name']}",
-        ['owner'],
-        registry=registry,
-    )
+    windows = {"all": state["all_time"]}
+    for window, blocks in REWARDS_WINDOW_BLOCKS.items():
+        totals = {}
+        for block, owner, amount in state["recent"]:
+            if block > head - blocks:
+                entry = totals.setdefault(owner, [0, 0])
+                entry[0] += amount
+                entry[1] += 1
+        windows[window] = totals
 
-    for i, (owner, total_stake) in enumerate(sorted_weekly_winners[:10]):
-        stake_bzz = total_stake / (10**BZZ_DECIMALS)
-        gauge_weekly.labels(owner=owner).set(stake_bzz)
-        with print_lock:
-            print(f"  - Top {i+1} weekly winner: {owner} with {stake_bzz} BZZ")
-        
-    # --- Monthly Winners ---
-                
-    # Save monthly winners data
-    monthly_winners_file_path = os.path.join(DATA_DIR, f"winners-monthly_{chain_name}.json")
-    try:
-        with open(monthly_winners_file_path, 'w') as f:
-            json.dump(monthly_winners, f)
-    except Exception as e:
-        with print_lock:
-            print(f"    - Could not save monthly winners file: {e}")
-        error_counter.labels(chain_name=chain_name, error_type='write_winners_monthly_file').inc()
-        
-    # Create leaderboard for monthly winners
-    sorted_monthly_winners = sorted(monthly_winners.items(), key=lambda item: item[1], reverse=True)
-    
-    # Create Gauge for top 10 monthly winners
-    metric_name_monthly = f"honeystats_{chain_name}_{contract_friendly_name}_winner_monthly_winnings"
-    gauge_monthly = Gauge(
-        metric_name_monthly,
-        f"Total monthly winnings for top 10 winners of {contract_friendly_name} on {chain_config['name']}",
-        ['owner'],
-        registry=registry,
-    )
-
-    for i, (owner, total_stake) in enumerate(sorted_monthly_winners[:10]):
-        stake_bzz = total_stake / (10**BZZ_DECIMALS)
-        gauge_monthly.labels(owner=owner).set(stake_bzz)
-        with print_lock:
-            print(f"  - Top {i+1} monthly winner: {owner} with {stake_bzz} BZZ")
-        
-    # --- All Time Winners ---
-            
-    sorted_winners = sorted(all_time_winners.items(), key=lambda item: item[1], reverse=True)
-    
-    # Create Gauge for top 10 winners
-    metric_name = f"honeystats_{chain_name}_{contract_friendly_name}_winner_total_winnings"
-    gauge = Gauge(
-        metric_name,
-        f"Total winnings for top 10 winners of {contract_friendly_name} on {chain_config['name']}",
-        ['owner'],
-        registry=registry,
-    )
-
-    for i, (owner, total_stake) in enumerate(sorted_winners[:10]):
-        stake_bzz = total_stake / (10**BZZ_DECIMALS)
-        gauge.labels(owner=owner).set(stake_bzz)
-        with print_lock:
-            print(f"  - Top {i+1} winner: {owner} with {stake_bzz} BZZ")
+    top_bzz = Gauge(f'honeystats_{chain_name}_rewards_top_bzz', 'Redistribution rewards (BZZ) of the top 10 owners', ['window', 'owner'], registry=registry)
+    top_wins = Gauge(f'honeystats_{chain_name}_rewards_top_wins', 'Rounds won by the top 10 owners', ['window', 'owner'], registry=registry)
+    total_bzz = Gauge(f'honeystats_{chain_name}_rewards_total_bzz', 'Redistribution rewards paid (BZZ)', ['window'], registry=registry)
+    total_wins = Gauge(f'honeystats_{chain_name}_rewards_wins_total', 'Rewards claimed (rounds won)', ['window'], registry=registry)
+    owners = Gauge(f'honeystats_{chain_name}_rewards_owners', 'Distinct owners that won', ['window'], registry=registry)
+    synced = Gauge(f'honeystats_{chain_name}_rewards_last_block', 'Last block scanned for rewards', registry=registry)
+    synced.set(head)
+    for window, totals in windows.items():
+        total_bzz.labels(window=window).set(sum(v[0] for v in totals.values()) / (10**BZZ_DECIMALS))
+        total_wins.labels(window=window).set(sum(v[1] for v in totals.values()))
+        owners.labels(window=window).set(len(totals))
+        for owner, (amount, wins) in sorted(totals.items(), key=lambda item: item[1][0], reverse=True)[:10]:
+            top_bzz.labels(window=window, owner=owner).set(amount / (10**BZZ_DECIMALS))
+            top_wins.labels(window=window, owner=owner).set(wins)
+    with print_lock:
+        print(f"  - Rewards scanned to block {head} ({current_block - head} behind head)")
 
 
 def process_redistribution_events(registry, error_counter, chain_name):
@@ -516,6 +390,10 @@ ROUND_LENGTH = 152  # Redistribution.sol: currentRound() = block.number / ROUND_
 ROUND_STATS_BACKFILL_ROUNDS = 4000  # ~30 days of rounds scanned on first start
 MAX_COUNTED_REDUNDANCY = 8  # PriceOracle caps redundancy at targetRedundancy + maxConsideredExtraRedundancy
 ROUND_STATS_CONFIRMATIONS = 10
+# Rewards leaderboard: block windows (Gnosis 5s blocks) and backfill pacing so
+# a cold start does not hold back the push for every other metric.
+REWARDS_WINDOW_BLOCKS = {"7d": 7 * 17280, "30d": 30 * 17280}
+REWARDS_MAX_WINDOWS_PER_RUN = 300
 
 
 def process_round_stats(registry, error_counter, chain_name):
@@ -912,7 +790,7 @@ def process_staking_events(registry, error_counter, chain_name):
 
     # Load last processed block number
     current_block = w3.eth.block_number
-    last_block_file_path = os.path.join(DATA_DIR, f"last_block_staking_{chain_name}.json")
+    last_block_file_path = os.path.join(DATA_DIR, f"last_block_staking_v2_{chain_name}.json")
     last_block_data = {}
     try:
         with open(last_block_file_path, 'r') as f:
@@ -928,7 +806,7 @@ def process_staking_events(registry, error_counter, chain_name):
             json.dump(last_block_data, f)
             
     # Load stakers data
-    stakers_file_path = os.path.join(DATA_DIR, f"stakers_{chain_name}.json")
+    stakers_file_path = os.path.join(DATA_DIR, f"stakers_v2_{chain_name}.json")
     try:
         with open(stakers_file_path, 'r') as f:
             stakers = json.load(f)
@@ -939,7 +817,7 @@ def process_staking_events(registry, error_counter, chain_name):
         stakers = {}
 
     # Load frozen stakers data
-    frozen_stakers_file_path = os.path.join(DATA_DIR, f"frozen_stakers_{chain_name}.json")
+    frozen_stakers_file_path = os.path.join(DATA_DIR, f"frozen_stakers_v2_{chain_name}.json")
     try:
         with open(frozen_stakers_file_path, 'r') as f:
             frozen_stakers = json.load(f)
@@ -947,10 +825,10 @@ def process_staking_events(registry, error_counter, chain_name):
         with print_lock:
             print(f"    - Could not load frozen stakers file: {e}")
         error_counter.labels(chain_name=chain_name, error_type='read_frozen_stakers_file').inc()
-        frozen_stakers = []
+        frozen_stakers = {}
 
     # Load event counts data
-    event_counts_file_path = os.path.join(DATA_DIR, f"event_counts_staking_{chain_name}.json")
+    event_counts_file_path = os.path.join(DATA_DIR, f"event_counts_staking_v2_{chain_name}.json")
     try:
         with open(event_counts_file_path, 'r') as f:
             event_counts = json.load(f)
@@ -977,6 +855,12 @@ def process_staking_events(registry, error_counter, chain_name):
         'Total number of StakeUpdated events in the staking contract',
         registry=registry
     )
+
+    stake_withdrawn_gauge = Gauge(
+        f'honeystats_{chain_name}_staking_stake_withdrawn_total',
+        'Total number of StakeWithdrawn events in the staking contract',
+        registry=registry
+    )
     
     stakers_gauge = Gauge(
         f'honeystats_{chain_name}_staking_stakers_total',
@@ -987,6 +871,12 @@ def process_staking_events(registry, error_counter, chain_name):
     total_stake_gauge = Gauge(
         f'honeystats_{chain_name}_staking_total_stake',
         'Total stake in the staking contract',
+        registry=registry
+    )
+
+    frozen_stakers_gauge = Gauge(
+        f'honeystats_{chain_name}_staking_frozen_stakers',
+        'Number of stakers whose stake is frozen right now',
         registry=registry
     )
 
@@ -1007,87 +897,47 @@ def process_staking_events(registry, error_counter, chain_name):
             print(f"  - Scanning for staking events from block {from_block} to {to_block}")
 
         try:
-            for event_data in contract.events.StakeSlashed.get_logs(from_block=from_block, to_block=to_block):
-                event_counts["stake_slashed"] += 1
-                owner = event_data.args.slashed
-                if owner in frozen_stakers:
-                    frozen_stakers.remove(owner)
-
-            for event_data in contract.events.StakeFrozen.get_logs(from_block=from_block, to_block=to_block):
-                event_counts["stake_frozen"] += 1
-                owner = event_data.args.frozen
-                if owner not in frozen_stakers:
-                    frozen_stakers.append(owner)
-
-            for event_data in contract.events.StakeUpdated.get_logs(from_block=from_block, to_block=to_block):
-                event_counts["stake_updated"] += 1
-                owner = event_data.args.owner
-                stake = event_data.args.committedStake
-                stakers[owner] = stake
-
-            for event_data in contract.events.StakeWithdrawn.get_logs(from_block=from_block, to_block=to_block):
-                owner = event_data.args.node
-                if owner in frozen_stakers:
-                    frozen_stakers.remove(owner)
-
-            # Save last processed block number
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: to_block}, f)
-
-            # Save stakers data
-            try:
-                with open(stakers_file_path, 'w') as f:
-                    json.dump(stakers, f)
-            except Exception as e:
-                with print_lock:
-                    print(f"    - Could not save stakers file: {e}")
-                error_counter.labels(chain_name=chain_name, error_type='write_stakers_file').inc()
-            
-            # Save frozen stakers data
-            try:
-                with open(frozen_stakers_file_path, 'w') as f:
-                    json.dump(frozen_stakers, f)
-            except Exception as e:
-                with print_lock:
-                    print(f"    - Could not save frozen stakers file: {e}")
-                error_counter.labels(chain_name=chain_name, error_type='write_frozen_stakers_file').inc()
-
-            # Save event counts
-            try:
-                with open(event_counts_file_path, 'w') as f:
-                    json.dump(event_counts, f)
-            except Exception as e:
-                with print_lock:
-                    print(f"    - Could not save event counts file: {e}")
-                error_counter.labels(chain_name=chain_name, error_type='write_event_counts_file').inc()
-
-            stakers_gauge.set(len(stakers))
-
-            total_stake = sum(stakers.values()) if stakers else 0
-            total_stake_gauge.set(total_stake / (10**BZZ_DECIMALS))
-
-            total_frozen_stake = 0
-            for owner in frozen_stakers:
-                if owner in stakers:
-                    total_frozen_stake += stakers[owner]
-            frozen_stake_gauge.set(total_frozen_stake / (10**BZZ_DECIMALS))
-
-            stake_slashed_gauge.set(event_counts["stake_slashed"])
-            stake_frozen_gauge.set(event_counts["stake_frozen"])
-            stake_updated_gauge.set(event_counts["stake_updated"])
-
-            from_block = to_block + 1
-
+            slashed = contract.events.StakeSlashed.get_logs(from_block=from_block, to_block=to_block)
+            frozen = contract.events.StakeFrozen.get_logs(from_block=from_block, to_block=to_block)
+            updated = contract.events.StakeUpdated.get_logs(from_block=from_block, to_block=to_block)
+            withdrawn = contract.events.StakeWithdrawn.get_logs(from_block=from_block, to_block=to_block)
+            # Slashes and withdrawals change the deposit without a StakeUpdated:
+            # read those owners' current deposit from the contract.
+            changed = {ev.args.slashed for ev in slashed} | {ev.args.node for ev in withdrawn}
+            current_stakes = {owner: contract.functions.stakes(owner).call()[2] for owner in changed}
         except Exception as e:
             with print_lock:
                 print(f"    - Could not get staking events for blocks {from_block}-{to_block}: {e}")
             error_counter.labels(chain_name=chain_name, error_type='get_staking_events').inc()
-            # If we get an error, we skip this chunk and move to the next one
-            from_block = to_block + 1
-            with open(last_block_file_path, 'w') as f:
-                json.dump({chain_name: from_block}, f)
-            time.sleep(1)
-    
+            break  # retry this window next run
+
+        # potentialStake is the BZZ deposit; committedStake is price-normalised.
+        for event_data in sorted(updated, key=lambda ev: (ev.blockNumber, ev.logIndex)):
+            stakers[event_data.args.owner] = event_data.args.potentialStake
+
+        for event_data in frozen:
+            owner = event_data.args.frozen
+            # Frozen for `time` blocks from the freeze.
+            frozen_stakers[owner] = max(frozen_stakers.get(owner, 0), event_data.blockNumber + event_data.args.time)
+
+        for owner, potential_stake in current_stakes.items():
+            if potential_stake:
+                stakers[owner] = potential_stake
+            else:
+                stakers.pop(owner, None)
+                frozen_stakers.pop(owner, None)
+
+        event_counts["stake_updated"] += len(updated)
+        event_counts["stake_frozen"] += len(frozen)
+        event_counts["stake_slashed"] += len(slashed)
+        event_counts["stake_withdrawn"] = event_counts.get("stake_withdrawn", 0) + len(withdrawn)
+
+        from_block = to_block + 1
+
+    # Last block is written with the state below so they cannot diverge.
+    with open(last_block_file_path, 'w') as f:
+        json.dump({chain_name: from_block - 1}, f)
+
     # Save stakers data
     try:
         with open(stakers_file_path, 'w') as f:
@@ -1121,7 +971,9 @@ def process_staking_events(registry, error_counter, chain_name):
     total_stake_gauge.set(total_stake / (10**BZZ_DECIMALS))
 
     total_frozen_stake = 0
-    for owner in frozen_stakers:
+    frozen_now = [owner for owner, until in frozen_stakers.items() if until > current_block]
+    frozen_stakers_gauge.set(len(frozen_now))
+    for owner in frozen_now:
         if owner in stakers:
             total_frozen_stake += stakers[owner]
     frozen_stake_gauge.set(total_frozen_stake / (10**BZZ_DECIMALS))
@@ -1129,6 +981,7 @@ def process_staking_events(registry, error_counter, chain_name):
     stake_slashed_gauge.set(event_counts["stake_slashed"])
     stake_frozen_gauge.set(event_counts["stake_frozen"])
     stake_updated_gauge.set(event_counts["stake_updated"])
+    stake_withdrawn_gauge.set(event_counts.get("stake_withdrawn", 0))
 
 
 import threading
