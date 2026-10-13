@@ -218,7 +218,7 @@ def process_winner_events(registry, error_counter):
     from_block = last_block + 1
 
     while from_block <= current_block:
-        to_block = min(from_block + 10000, current_block)
+        to_block = min(from_block + 9999, current_block)
         with print_lock:
             print(f"  - Scanning for WinnerSelected events from block {from_block} to {to_block}")
 
@@ -421,20 +421,6 @@ def process_redistribution_events(registry, error_counter, chain_name):
         'Total number of Revealed events in the redistribution game',
         registry=registry
     )
-    
-    commits_gauge = Gauge(
-        f'honeystats_{chain_name}_redistribution_commits_total',
-        'Total number of commits in the redistribution game',
-        ['round'],
-        registry=registry
-    )
-
-    reveals_gauge = Gauge(
-        f'honeystats_{chain_name}_redistribution_reveals_total',
-        'Total number of reveals in the redistribution game',
-        ['round'],
-        registry=registry
-    )
 
     current_block = w3.eth.block_number
 
@@ -485,7 +471,7 @@ def process_redistribution_events(registry, error_counter, chain_name):
         }
 
         while from_block <= scan_to_block:
-            to_block = min(from_block + 10000, scan_to_block)
+            to_block = min(from_block + 9999, scan_to_block)
             with print_lock:
                 print(f"  - Scanning {v_label} for redistribution events from block {from_block} to {to_block}")
 
@@ -500,16 +486,6 @@ def process_redistribution_events(registry, error_counter, chain_name):
                             "topics": [topic0]
                         })
                         event_counts[event_type] += len(logs)
-
-                # 2. Handle Round-based gauges (track per-round to avoid overwriting)
-                try:
-                    current_round = contract.functions.currentRound().call()
-                    for event_data in contract.events.CountCommits.get_logs(from_block=from_block, to_block=to_block):
-                        commits_gauge.labels(round=str(current_round)).set(event_data.args._count)
-                    for event_data in contract.events.CountReveals.get_logs(from_block=from_block, to_block=to_block):
-                        reveals_gauge.labels(round=str(current_round)).set(event_data.args._count)
-                except:
-                    pass
 
                 # Save last processed block number
                 with open(last_block_file_path, 'w') as f:
@@ -534,6 +510,152 @@ def process_redistribution_events(registry, error_counter, chain_name):
     withdraw_failed_gauge.set(event_counts["withdraw_failed"])
     committed_gauge.set(event_counts.get("committed", 0))
     revealed_gauge.set(event_counts.get("revealed", 0))
+
+
+ROUND_LENGTH = 152  # Redistribution.sol: currentRound() = block.number / ROUND_LENGTH
+ROUND_STATS_BACKFILL_ROUNDS = 4000  # ~30 days of rounds scanned on first start
+MAX_COUNTED_REDUNDANCY = 8  # PriceOracle caps redundancy at targetRedundancy + maxConsideredExtraRedundancy
+ROUND_STATS_CONFIRMATIONS = 10
+
+
+def process_round_stats(registry, error_counter, chain_name):
+    """Per-round redistribution stats for the current contract version.
+
+    For every claimed round: commits, reveals, and reveals matching the selected
+    truth (hash + depth) — the redundancyCount the PriceOracle adjusts on.
+    Rounds without a claim are counted as redundancy 0. Exported as cumulative
+    whole-round counts so dashboards can diff them without phase-boundary noise.
+    """
+    chain_config = CHAINS[chain_name]
+    w3 = Web3(Web3.HTTPProvider(chain_config["rpc_url"]))
+    contract_config = chain_config["contracts"]["redistribution"]
+    versions = contract_config.get("versions", [{"address": contract_config["address"], "from_block": contract_config.get("deployment_block", 0), "to_block": None}])
+    version = versions[-1]
+    contract = w3.eth.contract(address=version["address"], abi=get_abi("redistribution", chain_name))
+
+    state_file_path = os.path.join(DATA_DIR, f"round_stats_{chain_name}.json")
+    try:
+        with open(state_file_path, 'r') as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    if state.get("address") != version["address"]:
+        state = {}
+
+    current_block = w3.eth.block_number - ROUND_STATS_CONFIRMATIONS  # state is append-only; stay clear of reorgs
+    if not state:
+        start_block = max(version["from_block"], current_block - ROUND_STATS_BACKFILL_ROUNDS * ROUND_LENGTH)
+        start_round = start_block // ROUND_LENGTH + 1  # first round fully inside the scan window
+        state = {
+            "address": version["address"],
+            "last_block": start_round * ROUND_LENGTH - 1,
+            "last_claimed_round": start_round - 1,
+            "pending_reveals": {},
+            "by_redundancy": {},
+            "claimed": 0, "skipped": 0, "commits": 0, "reveals": 0, "matching": 0,
+            "last": {},
+        }
+
+    revealed_event = contract.events.Revealed()
+    truth_event = contract.events.TruthSelected()
+    count_commits_event = contract.events.CountCommits()
+    count_reveals_event = contract.events.CountReveals()
+    topics = {k: "0x" + w3.keccak(text=sig).hex().removeprefix("0x") for k, sig in {
+        "revealed": "Revealed(uint256,bytes32,uint256,uint256,bytes32,uint8)",
+        "truth": "TruthSelected(bytes32,uint8)",
+        "commits": "CountCommits(uint256)",
+        "reveals": "CountReveals(uint256)",
+    }.items()}
+
+    from_block = state["last_block"] + 1
+    while from_block <= current_block:
+        to_block = min(from_block + 9999, current_block)
+        try:
+            logs = w3.eth.get_logs({
+                "address": version["address"],
+                "fromBlock": from_block,
+                "toBlock": to_block,
+                "topics": [list(topics.values())],
+            })
+        except Exception as e:
+            with print_lock:
+                print(f"    - Could not get round stats events for {chain_name} blocks {from_block}-{to_block}: {e}")
+            error_counter.labels(chain_name=chain_name, error_type='get_round_stats_events').inc()
+            time.sleep(1)
+            break  # retry this window next run; never skip blocks, or rounds go missing
+
+        # claim() emits CountCommits, CountReveals, TruthSelected in one tx
+        claims = {}
+        for log in sorted(logs, key=lambda l: (l["blockNumber"], l["logIndex"])):
+            topic0 = "0x" + log["topics"][0].hex().removeprefix("0x")
+            if topic0 == topics["revealed"]:
+                ev = revealed_event.process_log(log)
+                rnd = str(ev.args.roundNumber)
+                state["pending_reveals"].setdefault(rnd, []).append(
+                    [ev.args.reserveCommitment.hex(), ev.args.depth])
+                continue
+            claim = claims.setdefault(log["transactionHash"].hex(), {"block": log["blockNumber"]})
+            if topic0 == topics["commits"]:
+                claim["commits"] = count_commits_event.process_log(log).args._count
+            elif topic0 == topics["reveals"]:
+                claim["reveals"] = count_reveals_event.process_log(log).args._count
+            elif topic0 == topics["truth"]:
+                ev = truth_event.process_log(log)
+                claim["truth"] = [ev.args.hash.hex(), ev.args.depth]
+
+        for claim in sorted(claims.values(), key=lambda c: c["block"]):
+            if "truth" not in claim:
+                continue
+            rnd = claim["block"] // ROUND_LENGTH
+            if rnd <= state["last_claimed_round"]:
+                continue
+            skipped = rnd - state["last_claimed_round"] - 1
+            state["skipped"] += skipped
+            state["by_redundancy"]["0"] = state["by_redundancy"].get("0", 0) + skipped
+            reveals = state["pending_reveals"].get(str(rnd), [])
+            matching = sum(1 for r in reveals if r == claim["truth"])
+            bucket = str(min(matching, MAX_COUNTED_REDUNDANCY))
+            state["by_redundancy"][bucket] = state["by_redundancy"].get(bucket, 0) + 1
+            state["claimed"] += 1
+            state["commits"] += claim.get("commits", 0)
+            state["reveals"] += claim.get("reveals", 0)
+            state["matching"] += matching
+            state["last_claimed_round"] = rnd
+            state["last"] = {"round": rnd, "commits": claim.get("commits", 0),
+                             "reveals": claim.get("reveals", 0), "matching": matching,
+                             "depth": claim["truth"][1]}
+
+        # reveals of rounds older than the last claim can no longer be matched
+        state["pending_reveals"] = {r: v for r, v in state["pending_reveals"].items()
+                                    if int(r) > state["last_claimed_round"] - 2}
+        state["last_block"] = to_block
+        with open(state_file_path, 'w') as f:
+            json.dump(state, f)
+        from_block = to_block + 1
+
+    # Rounds that ended with no claim. The current round can still be claimed.
+    unclaimed_now = max(0, min(current_block, state["last_block"]) // ROUND_LENGTH - state["last_claimed_round"] - 1)
+
+    prefix = f"honeystats_{chain_name}_round"
+    by_redundancy = Gauge(f"{prefix}s_by_redundancy_total",
+                          'Rounds by number of reveals matching the truth (0 = no claim); PriceOracle input',
+                          ['redundancy'], registry=registry)
+    for n in range(MAX_COUNTED_REDUNDANCY + 1):
+        value = state["by_redundancy"].get(str(n), 0)
+        by_redundancy.labels(redundancy=str(n)).set(value + (unclaimed_now if n == 0 else 0))
+    for name, desc, value in [
+        ("s_claimed_total", "Rounds with a claim", state["claimed"]),
+        ("s_without_claim_total", "Rounds that ended without a claim", state["skipped"] + unclaimed_now),
+        ("_commits_total", "Commits in claimed rounds", state["commits"]),
+        ("_reveals_total", "Reveals in claimed rounds", state["reveals"]),
+        ("_matching_reveals_total", "Reveals matching the truth in claimed rounds", state["matching"]),
+        ("_nonreveals_total", "Commits never revealed in claimed rounds", state["commits"] - state["reveals"]),
+        ("_disagreements_total", "Reveals not matching the truth in claimed rounds", state["reveals"] - state["matching"]),
+    ]:
+        Gauge(f"{prefix}{name}", desc, registry=registry).set(value)
+    last = state.get("last") or {}
+    for key in ("round", "commits", "reveals", "matching", "depth"):
+        Gauge(f"{prefix}_last_claimed_{key}", f"Last claimed round: {key}", registry=registry).set(last.get(key, 0))
 
 
 def process_postagestamp_events(registry, error_counter, chain_name):
@@ -646,7 +768,7 @@ def process_postagestamp_events(registry, error_counter, chain_name):
         from_block = last_block + 1
 
         while from_block <= scan_to_block:
-            to_block = min(from_block + 10000, scan_to_block)
+            to_block = min(from_block + 9999, scan_to_block)
             with print_lock:
                 print(
                     f"  - Scanning {v_label} for postagestamp events from block {from_block} to {to_block}"
@@ -880,7 +1002,7 @@ def process_staking_events(registry, error_counter, chain_name):
         print(f"Scanning for staking events from block {from_block} to {current_block}...")
 
     while from_block <= current_block:
-        to_block = min(from_block + 10000, current_block)
+        to_block = min(from_block + 9999, current_block)
         with print_lock:
             print(f"  - Scanning for staking events from block {from_block} to {to_block}")
 
@@ -1113,6 +1235,10 @@ def main(registry):
         redistribution_thread = threading.Thread(target=process_redistribution_events, args=(registry, redistribution_errors, chain_name))
         threads.append(redistribution_thread)
         redistribution_thread.start()
+
+        round_stats_thread = threading.Thread(target=process_round_stats, args=(registry, redistribution_errors, chain_name))
+        threads.append(round_stats_thread)
+        round_stats_thread.start()
 
         staking_thread = threading.Thread(target=process_staking_events, args=(registry, redistribution_errors, chain_name))
         threads.append(staking_thread)
